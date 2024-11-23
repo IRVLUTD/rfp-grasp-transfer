@@ -31,7 +31,6 @@ class GcsGraspTransferOpt:
         running_name=None,
         energy_func_name="euclidean_dist",
         device="cuda" if torch.cuda.is_available() else "cpu",
-        verbose_energy=False,
     ):
         """
         source_robot_name: str
@@ -55,8 +54,6 @@ class GcsGraspTransferOpt:
             right now only supports "euclidean_dist" (default)
         device: str
             cuda or cpu device to run the optimization on
-        verbose_energy: bool
-            whether to print detailed metrics during the optimization
         """
         self.running_name = running_name
         self.device = device
@@ -66,8 +63,6 @@ class GcsGraspTransferOpt:
         self.num_particles = num_particles
         self.init_random_scale = init_rand_scale
         self.learning_rate = learning_rate
-
-        self.verbose_energy = verbose_energy
 
         self.global_step = None
         self.source_grasp_goal = None
@@ -130,6 +125,15 @@ class GcsGraspTransferOpt:
         self.q_joint_lower = self.target_handmodel.dynamic_joints_q_lower.detach()
         self.q_joint_upper = self.target_handmodel.dynamic_joints_q_upper.detach()
 
+        # We optimize only for the pose if the gripper is two finger gripper
+        self.only_pose_opt = target_robot_name in {
+            "fetch_gripper",
+            "franka_panda",
+            "wsg_50",
+            "sawyer",
+            "h5_hand",
+        }
+
         if source_grasp_goal is not None:
             assert (
                 source_pose_align is not None
@@ -185,11 +189,7 @@ class GcsGraspTransferOpt:
         )
 
         # initialize the opt for grasp = (posn, rotn, dof joints)
-        self.q_current = torch.zeros(
-            self.num_particles,
-            3 + 6 + len(self.target_handmodel.dynamic_joints),
-            device=self.device,
-        )
+        q_pose = torch.zeros(self.num_particles, 9, device=self.device)
 
         # Pose Init --> initialize as the source gripper pose
         palm_pose_7d = convert_aligned_to_gripper_pose(
@@ -201,17 +201,31 @@ class GcsGraspTransferOpt:
         palm_position = palm_pose_tf[:3, 3]
         # ortho6d rotation representation: (x1, x2, x3, y1, y2, y3)
         palm_rotation = palm_pose_tf[:3, :3].transpose(0, 1).reshape(9)[:6]
-        self.q_current[:, 0:3] = palm_position.repeat(self.num_particles, 1)
-        self.q_current[:, 3:9] = palm_rotation.repeat(self.num_particles, 1)
+        q_pose[:, 0:3] = palm_position.repeat(self.num_particles, 1)
+        q_pose[:, 3:9] = palm_rotation.repeat(self.num_particles, 1)
 
-        # DOFs initialization
-        # Set the dof values to be initialized between (lower, lower + range * rand_0_1 * scale)
-        self.q_current[:, 9:] = (
-            self.init_random_scale
-            * torch.rand_like(self.q_current[:, 9:])
-            * (self.q_joint_upper - self.q_joint_lower)
-            + self.q_joint_lower
-        )
+        if not self.only_pose_opt:
+            # DOFs initialization
+            # Set the dof values to be initialized between (lower, lower + range * rand_0_1 * scale)
+            self.q_current = torch.zeros(
+                self.num_particles,
+                3 + 6 + len(self.target_handmodel.dynamic_joints),
+                device=self.device,
+            )
+            self.q_current[:, :9] = q_pose.clone()
+            self.q_current[:, 9:] = (
+                self.init_random_scale
+                * torch.rand_like(self.q_current[:, 9:])
+                * (self.q_joint_upper - self.q_joint_lower)
+                + self.q_joint_lower
+            )
+        else:
+            self.q_current = torch.zeros(
+                self.num_particles,
+                9,
+                device=self.device,
+            )
+            self.q_current[:, :9] = q_pose.clone()
         self.q_current.requires_grad = True
         self.optimizer = torch.optim.Adam([self.q_current], lr=self.learning_rate)
 
@@ -219,11 +233,13 @@ class GcsGraspTransferOpt:
 
         # shape (num_particles, N, 3) -- since there are `num_particles` candidate target grasps
         target_hand_pts = self.target_handmodel.get_surface_points().clone()[
-            :, self.target_corr_idxs,
+            :,
+            self.target_corr_idxs,
         ]
         # shape (N, 3) -- since there is only 1 source grasp
         source_hand_pts = self.source_handmodel.get_surface_points().clone()[
-            0, self.source_corr_idxs,
+            0,
+            self.source_corr_idxs,
         ]
 
         num_particles = self.num_particles
@@ -247,19 +263,30 @@ class GcsGraspTransferOpt:
         energy = energy_contact
         self.energy = energy
 
-        # TODO: add a normalized energy?
-        z_norm = F.relu(self.q_current[:, 9:] - self.q_joint_upper) + F.relu(
-            self.q_joint_lower - self.q_current[:, 9:]
-        )
-        self.energy = energy + z_norm.sum(dim=1)
-        if self.verbose_energy:
-            return energy, energy_penetration, z_norm
-        else:
-            return energy
+        if not self.only_pose_opt:
+            # TODO: add a normalized energy?
+            z_norm = F.relu(self.q_current[:, 9:] - self.q_joint_upper) + F.relu(
+                self.q_joint_lower - self.q_current[:, 9:]
+            )
+            z_energy = z_norm.sum(dim=1)
+            self.energy = energy + z_energy
+
+        return energy
 
     def step(self):
         self.optimizer.zero_grad()
-        self.target_handmodel.update_kinematics(q=self.q_current)
+        if self.only_pose_opt:
+            # since q_current is actually just the grasp pose, we also need some default dofs to update the kinematics
+            sample_dofs = torch.zeros(
+                self.num_particles, len(self.target_handmodel.dynamic_joints)
+            )
+
+            self.target_handmodel.update_kinematics(
+                q=torch.cat((self.q_current, sample_dofs), dim=1)
+            )
+        else:
+            self.target_handmodel.update_kinematics(q=self.q_current)
+
         energy = self.compute_energy()
         energy.mean().backward()
         self.optimizer.step()
