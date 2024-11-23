@@ -25,6 +25,8 @@ Please use the provided `env.yml` to create a conda environment for this reposit
 
 - `utils` includes some commonly used functions, importantly there are some utilities which can help with pose alignment between different grippers, and some rotation conversions.
 
+  - `utils/grasp_utils.py`: gripper pose alignment to a common space -- useful for transferring grasps. Note, the values for each gripper are tuned according to the urdf models provided under `grippers/` dir. If your urdf is different from the ones provided, then you may need to define a custom alignment function: (1) hand palm normal should be +Z, (2) major axis for palm should be +Y, (3) hand origin should be on palm surface
+
 - Gripper urdfs are under `grippers/`. Also included are files like:
 
   - `mgg_gripper_surface_pts.pk`: pickled dict containg the pre-selected interior surface points for the gripper along with their unified coordinates used for correspondence and transfer.
