@@ -11,6 +11,17 @@ Please use the provided `env.yml` to create a conda environment for this reposit
 
 - Cuda 11.8
 
+We have the `mano_pybullet` added as a submodule which you can install by following steps. This module is included since we used this create a mano hand urdf from the original mano models. It also gives some utility functions to convert the mano hand parameters. 
+
+- `cd mano_pybullet`
+
+- `pip install -e .`
+
+- Please go through its README and test the functionality using the `gui_control` tool.
+
+  - If you see an error like `ImportError: cannot import name 'bool' from 'numpy'`, please try: `pip install git+https://github.com/mattloper/chumpy` [Link to github issue](https://github.com/mattloper/chumpy/issues/55)
+
+
 **Code Setup:**
 
 - The core functionality is implemented in `model/`, specifically `hand_model.py` and `hand_opt.py`.
