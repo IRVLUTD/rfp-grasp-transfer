@@ -11,7 +11,9 @@ Please use the provided `env.yml` to create a conda environment for this reposit
 
 - Cuda 11.8
 
-We have the `mano_pybullet` added as a submodule which you can install by following steps. This module is included since we used this create a mano hand urdf from the original mano models. It also gives some utility functions to convert the mano hand parameters. 
+- Dependencies: `torch, numpy, scipy, tqdm, trimesh, plotly, pytorch_kinematics, transforms3d, numpy-quaternion`
+
+We have the `mano_pybullet` added as a submodule which you can install by following steps. This module is included since we used this create a mano hand urdf from the original mano models. It also gives some utility functions to convert the mano hand parameters.
 
 - `cd mano_pybullet`
 
