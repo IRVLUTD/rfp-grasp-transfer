@@ -62,7 +62,7 @@ def extract_source_data(mano_params, translation_array, idx_to_use):
     source_data = {
         "hand_rot_mat": mano_params["global_orient"][idx_to_use][0][0],
         "hand_thetas": mano_params["hand_pose"][idx_to_use][0],
-        "translation": translation_array[idx_to_use],
+        "translation": translation_array[idx_to_use][0],
     }
     return source_data
 
@@ -183,10 +183,10 @@ def transfer_grasp(
     pyb_model_origin = manopyb_model.origins()[0]
     palm_trans = trans + pyb_model_origin - palm_basis @ pyb_model_origin
 
-    actual_trans = palm_trans
-    actual_basis = palm_basis
+    actual_trans = np.array(palm_trans)
+    actual_basis = np.array(palm_basis)
     if is_left:
-        actual_trans = palm_trans
+        # actual_trans = palm_trans
         actual_trans -= trans
         actual_trans[0] *= -1
         actual_trans += trans
@@ -197,11 +197,12 @@ def transfer_grasp(
         rotmat_flip = rotation_matrix_from_vectors(r_palm_normal, r_palm_normal_flip)
         actual_basis = rotmat_flip @ palm_basis
 
+    print(actual_trans)
+
     grasp_pose = torch.zeros(9)
     # Rotation in 6D representation looks like: (x1,x2,x3, y1,y2,y3) (1st 2 columns from the rot mat)
     grasp_pose[3:] = torch.tensor(actual_basis.T.reshape(-1)[:6])
     grasp_pose[:3] = torch.tensor(actual_trans)
-    # print("Source Grasp Pose:", grasp_pose)
 
     grasp_dofs = torch.tensor(angles)
     # grasp_dofs = -1 * torch.tensor(angles) if is_left else torch.tensor(angles)
@@ -217,6 +218,8 @@ def transfer_grasp(
         .to(source_model.device)
         .float()
     )
+
+    print("POSE:", grasp_pose)
 
     grasp_transfer_opt = AdamGraspTransfer(
         source_model.robot_name,
@@ -375,12 +378,39 @@ def main(args):
 
         if debug_plots:
             if plots.left:
-                # TODO: load and add the point cloud for mano hand inferred by hamer
-                figleft = go.Figure(data=plots.left)
-                figleft.write_html(osp.join(transfer_extra_dir, f"{fname}_0.html"))
+                vis_data = plots.left
+                mano_pc = trimesh.load_mesh(
+                    osp.join(hamer_root_dir, "3dhand", f"{fname}_0.ply")
+                )
+                x, y, z = mano_pc.vertices.T
+                vis_data += [
+                    go.Scatter3d(
+                        x=x,
+                        y=y,
+                        z=z,
+                        mode="markers",
+                        marker=dict(size=2, color="green"),
+                    )
+                ]
+                fig = go.Figure(data=vis_data)
+                fig.write_html(osp.join(transfer_extra_dir, f"{fname}_0.html"))
             if plots.right:
-                figright = go.Figure(data=plots.right)
-                figright.write_html(osp.join(transfer_extra_dir, f"{fname}_1.html"))
+                vis_data = plots.right
+                mano_pc = trimesh.load_mesh(
+                    osp.join(hamer_root_dir, "3dhand", f"{fname}_1.ply")
+                )
+                x, y, z = mano_pc.vertices.T
+                vis_data += [
+                    go.Scatter3d(
+                        x=x,
+                        y=y,
+                        z=z,
+                        mode="markers",
+                        marker=dict(size=2, color="green"),
+                    )
+                ]
+                fig = go.Figure(data=vis_data)
+                fig.write_html(osp.join(transfer_extra_dir, f"{fname}_1.html"))
 
 
 def make_parser():
