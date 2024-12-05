@@ -19,9 +19,10 @@ We have the `mano_pybullet` added as a submodule which you can install by follow
 
 - `pip install -e .`
 
-- Please go through its README and test the functionality using the `gui_control` tool.
+- Please go through its README and test the functionality using the `gui_control` tool. You will need to set the `MANO_MODELS_DIR` env var to the path for extracted mano models dir.
 
-  - If you see an error like `ImportError: cannot import name 'bool' from 'numpy'`, please try: `pip install git+https://github.com/mattloper/chumpy` [Link to github issue](https://github.com/mattloper/chumpy/issues/55)
+  - If you see an error like `ImportError: cannot import name 'bool' from 'numpy'`:
+    - Try: `pip install git+https://github.com/mattloper/chumpy` [Link to github issue](https://github.com/mattloper/chumpy/issues/55)
 
 
 **Code Setup:**
@@ -50,11 +51,18 @@ We have the `mano_pybullet` added as a submodule which you can install by follow
 
 ## Usage and Examples
 
-- Please see `notebooks/example_grasp_transfer.ipynb` for a usage example on grasp transfer. 
-
-- The grasp transfer is supported between robot grippers under `grippers/` dir. 
+- Primary Script: `transfer_from_hamer.py`. The main argument will be the demonstration data dir which has subfolders like `rgb, depth, pose` as well as `out/hamer/` for mano hand data from hamer 
   
-- The input to grasp transfer object `GcsGraspTransferOpt` requires: (1) source and target gripper names, (2) source gripper grasp q
+  - `--input_dir`: path to demo data dir
+  - `--mano_model_dir`: path to Mano `models/` dir, for example `~/Datasets/MANO/MANO_Hand_Model/mano_v1_2/models`
+  - (Optional) `--target_gripper`: `fetch_gripper` by default
+  - (Optional) `--debug_plots`: whether to save extra plotly html plots for vizualization (off by default) 
+
+- Please see `notebooks/example_grasp_transfer.ipynb` for a usage example on grasp transfer. Playground for hamer transfer is under `notebooks/transfer_from_hamer.ipynb`.
+
+  - The grasp transfer is supported between robot grippers under `grippers/` dir. 
+  
+  - The input to grasp transfer object `GcsGraspTransferOpt` requires: (1) source and target gripper names, (2) source gripper grasp q
 
   - Here grasp `q` refers to a `(9+d)` dimensional tensor where its broken down as:
 
@@ -62,11 +70,13 @@ We have the `mano_pybullet` added as a submodule which you can install by follow
     - `q[3:9]`: gripper base link orientation, represented as a 6d vector of two orthogonal components (think first 2 columns of a rotation matrix, in order like {x1,x2,x3,y1,y2,y3})
     - `q[9:d]`: joint values for `d` joints on the source gripper (so in essence `d ~ DOFS`)
 
-- It also includes some example to visualize the grippers and results. 
+  - It also includes some example to visualize the grippers and results. 
 
 ### To Do
 
-- Add instructions and usage example to obtain the Mano Hand URDF's dofs and base link pose given the $(\theta, \beta)$ parameters.
+- Add documentation for how we deal with left hand detections from hamer.
+
+- Check if we need to tweak the correspondences between mano and fetch so that one finger is with thumb and other with middle finger? -- for better transfers and grasping? 
 
 ## References
 
