@@ -127,12 +127,6 @@ def transfer_grasp_handler(
         plots = LeftRightTuple(left=fig_left, right=fig_right)
         meshes = LeftRightTuple(left=mesh_left, right=mesh_right)
 
-        # plots = [None, None]
-        # meshes = [None, None]
-        # plots[right_idxs[0]] = fig_right
-        # plots[left_idxs[0]] = fig_left
-        # meshes[right_idxs[0]] = mesh_right
-        # meshes[left_idxs[0]] = mesh_left
     else:
         assert has_left or has_right
         result = []
@@ -186,7 +180,6 @@ def transfer_grasp(
     actual_trans = np.array(palm_trans)
     actual_basis = np.array(palm_basis)
     if is_left:
-        # actual_trans = palm_trans
         actual_trans -= trans
         actual_trans[0] *= -1
         actual_trans += trans
@@ -196,8 +189,6 @@ def transfer_grasp(
         r_palm_normal_flip[0] *= -1
         rotmat_flip = rotation_matrix_from_vectors(r_palm_normal, r_palm_normal_flip)
         actual_basis = rotmat_flip @ palm_basis
-
-    print(actual_trans)
 
     grasp_pose = torch.zeros(9)
     # Rotation in 6D representation looks like: (x1,x2,x3, y1,y2,y3) (1st 2 columns from the rot mat)
@@ -219,8 +210,7 @@ def transfer_grasp(
         .float()
     )
 
-    print("POSE:", grasp_pose)
-
+    # print("POSE:", grasp_pose)
     grasp_transfer_opt = AdamGraspTransfer(
         source_model.robot_name,
         target_model.robot_name,
@@ -232,7 +222,6 @@ def transfer_grasp(
         source_grasp_q.squeeze(0), running_name="test"
     )
     min_energy_index = energy.min(dim=0)[1].item()
-    # print(f"Final min energy index: {min_energy_index}")
     best_target_q = q_traj[min_energy_index, -1]
     target_grasp_q = best_target_q.detach()
 
