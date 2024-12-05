@@ -112,8 +112,8 @@ def transfer_grasp_handler(
         source_data_left = extract_source_data(mano_params, translation, left_idxs)
         RT_target_left, fig_left, mesh_left = transfer_grasp(
             source_data_left,
-            source_models.left,
-            manopyb_models.left,
+            source_models.right,
+            manopyb_models.right,
             target_model,
             is_left=True,
         )
@@ -152,8 +152,8 @@ def transfer_grasp_handler(
             source_data = extract_source_data(mano_params, translation, left_idxs)
             RT_target_left, fig_left, mesh_left = transfer_grasp(
                 source_data,
-                source_models.left,
-                manopyb_models.left,
+                source_models.right,
+                manopyb_models.right,
                 target_model,
                 is_left=True,
             )
@@ -183,13 +183,19 @@ def transfer_grasp(
     pyb_model_origin = manopyb_model.origins()[0]
     palm_trans = trans + pyb_model_origin - palm_basis @ pyb_model_origin
 
+    actual_trans = palm_trans
+    if is_left:
+        actual_trans -= trans
+        actual_trans[0] *= -1
+        actual_trans += trans
     grasp_pose = torch.zeros(9)
     # Rotation in 6D representation looks like: (x1,x2,x3, y1,y2,y3) (1st 2 columns from the rot mat)
     grasp_pose[3:] = torch.tensor(palm_basis.T.reshape(-1)[:6])
-    grasp_pose[:3] = torch.tensor(palm_trans)
+    grasp_pose[:3] = torch.tensor(actual_trans)
     # print("Source Grasp Pose:", grasp_pose)
 
-    grasp_dofs = -1 * torch.tensor(angles) if is_left else torch.tensor(angles)
+    grasp_dofs = torch.tensor(angles)
+    # grasp_dofs = -1 * torch.tensor(angles) if is_left else torch.tensor(angles)
 
     source_grasp_q = (
         torch.cat(
