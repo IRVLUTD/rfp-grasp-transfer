@@ -13,7 +13,7 @@ import plotly.graph_objects as go
 
 from mano_pybullet.hand_model import HandModel20
 
-from utils.grasp_utils import get_handmodel
+from utils.grasp_utils import get_handmodel, rotation_matrix_from_vectors
 from utils.rot6d_utils import mat2rvec, robust_compute_rotation_matrix_from_ortho6d
 from model.hand_opt import AdamGraspTransfer
 from model.hand_model import GcsHandModel
@@ -184,13 +184,21 @@ def transfer_grasp(
     palm_trans = trans + pyb_model_origin - palm_basis @ pyb_model_origin
 
     actual_trans = palm_trans
+    actual_basis = palm_basis
     if is_left:
         actual_trans -= trans
         actual_trans[0] *= -1
         actual_trans += trans
+
+        r_palm_normal = palm_basis @ np.array([0, -1, 0])
+        r_palm_normal_flip = np.array(r_palm_normal)
+        r_palm_normal_flip[0] *= -1
+        rotmat_flip = rotation_matrix_from_vectors(r_palm_normal, r_palm_normal_flip)
+        actual_basis = rotmat_flip @ palm_basis
+
     grasp_pose = torch.zeros(9)
     # Rotation in 6D representation looks like: (x1,x2,x3, y1,y2,y3) (1st 2 columns from the rot mat)
-    grasp_pose[3:] = torch.tensor(palm_basis.T.reshape(-1)[:6])
+    grasp_pose[3:] = torch.tensor(actual_basis.T.reshape(-1)[:6])
     grasp_pose[:3] = torch.tensor(actual_trans)
     # print("Source Grasp Pose:", grasp_pose)
 
