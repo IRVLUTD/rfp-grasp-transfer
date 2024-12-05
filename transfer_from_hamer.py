@@ -186,6 +186,7 @@ def transfer_grasp(
     actual_trans = palm_trans
     actual_basis = palm_basis
     if is_left:
+        actual_trans = palm_trans
         actual_trans -= trans
         actual_trans[0] *= -1
         actual_trans += trans
