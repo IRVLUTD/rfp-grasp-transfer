@@ -228,7 +228,7 @@ def transfer_grasp(
     q_traj, energy, _ = grasp_transfer_opt.run_adam(
         source_grasp_q.squeeze(0), running_name="test"
     )
-    min_energy_index = energy.min(dim=0)[1]
+    min_energy_index = energy.min(dim=0)[1].item()
     # print(f"Final min energy index: {min_energy_index}")
     best_target_q = q_traj[min_energy_index, -1]
     target_grasp_q = best_target_q.detach()
@@ -249,16 +249,25 @@ def transfer_grasp(
     if target_grasp_q.shape[0] != 9 + len(target_model.dynamic_joints):
         # We optimized only for pose, so need to provide dummy joints
         target_grasp_q = torch.cat(
-            (target_grasp_q, target_model.dynamic_joints_q_upper[0]), dim=0
+            (
+                target_grasp_q,
+                (
+                    target_model.dynamic_joints_q_upper[0]
+                    - target_model.dynamic_joints_q_mid[0]
+                ),
+            ),
+            dim=0,
         )
 
     # Plotly viz figure
-    vis_data = source_model.get_plotly_data(q=source_grasp_q, color="red")
+    vis_data = source_model.get_plotly_data(q=source_grasp_q, color="red", opacity=0.3)
     target_gripper_mesh_data = target_model.get_plotly_data(
-        q=target_grasp_q.unsqueeze(0).float().to(target_model.device), color="green"
+        q=target_grasp_q.unsqueeze(0).float().to(target_model.device),
+        color="green",
+        opacity=0.3,
     )
     vis_data += target_gripper_mesh_data
-    plotly_fig = go.Figure(data=vis_data)
+    # plotly_fig = go.Figure(data=vis_data)
 
     # Target gripper mesh
     target_grp_trimesh = []
@@ -268,7 +277,7 @@ def transfer_grasp(
         target_grp_trimesh.append(trimesh.Trimesh(vertices=vertices, faces=faces))
     target_mesh = trimesh.util.concatenate(target_grp_trimesh)
 
-    return target_RT, plotly_fig, target_mesh
+    return target_RT, vis_data, target_mesh
 
 
 def main(args):
@@ -296,13 +305,13 @@ def main(args):
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # Initiliaze HandModels for mano left/right and target gripper
-    _source_model_left = get_handmodel(
-        "mano_left",
-        1,
-        device,
-        json_path="urdf_assets_meta.json",
-        datadir="./grippers/",
-    )
+    # _source_model_left = get_handmodel(
+    #     "mano_left",
+    #     1,
+    #     device,
+    #     json_path="urdf_assets_meta.json",
+    #     datadir="./grippers/",
+    # )
     _source_model_right = get_handmodel(
         "mano_right",
         1,
@@ -319,12 +328,12 @@ def main(args):
     )
 
     # Initialize Mano Pybullet models for left/right (useful for conversion from mano to urdf equivalent)
-    _manopyb_left = HandModel20(left_hand=True)
+    # _manopyb_left = HandModel20(left_hand=True)
     _manopyb_right = HandModel20(left_hand=False)
 
     # Init the named tuples for mano models (gcs and mano_pybullet)
-    source_models = LeftRightTuple(_source_model_left, _source_model_right)
-    manopyb_models = LeftRightTuple(_manopyb_left, _manopyb_right)
+    source_models = LeftRightTuple(left=None, right=_source_model_right)
+    manopyb_models = LeftRightTuple(left=None, right=_manopyb_right)
 
     # Populate a list of hamer output npz files to iterate over and transfer grasp
     npz_files = [
@@ -366,9 +375,12 @@ def main(args):
 
         if debug_plots:
             if plots.left:
-                plots.left.write_html(osp.join(transfer_extra_dir, f"{fname}_0.html"))
+                # TODO: load and add the point cloud for mano hand inferred by hamer
+                figleft = go.Figure(data=plots.left)
+                figleft.write_html(osp.join(transfer_extra_dir, f"{fname}_0.html"))
             if plots.right:
-                plots.right.write_html(osp.join(transfer_extra_dir, f"{fname}_1.html"))
+                figright = go.Figure(data=plots.right)
+                figright.write_html(osp.join(transfer_extra_dir, f"{fname}_1.html"))
 
 
 def make_parser():
