@@ -369,9 +369,9 @@ def main(args):
         # Save viz and transfer data logs
         fname, _ = os.path.splitext(os.path.basename(npz_fpath))
         if meshes.left:
-            meshes.left.export(osp.join(transfer_mesh_dir, f"{fname}_0.obj"))
+            meshes.left.export(osp.join(transfer_mesh_dir, f"{fname}_0.ply"))
         if meshes.right:
-            meshes.right.export(osp.join(transfer_mesh_dir, f"{fname}_1.obj"))
+            meshes.right.export(osp.join(transfer_mesh_dir, f"{fname}_1.ply"))
 
         if debug_plots:
             if plots.left:
