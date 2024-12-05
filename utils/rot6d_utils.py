@@ -3,6 +3,12 @@ import numpy as np
 import transforms3d
 
 
+def mat2rvec(mat):
+    """Convert rotation matrix to rotation vector."""
+    axis, angle = transforms3d.axangles.mat2axangle(mat, unit_thresh=1e-05)
+    return axis * angle
+
+
 def get_rot6d_from_rot3d(rot3d):
     global_rotation = np.array(
         transforms3d.euler.euler2mat(rot3d[0], rot3d[1], rot3d[2])
