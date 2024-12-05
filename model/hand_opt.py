@@ -77,6 +77,8 @@ class GcsGraspTransferOpt:
         self.optimizer = None
 
         ########### Init the Source Hand Model #################
+        current_fpath = os.path.abspath(__file__)
+        parent_dir = os.path.dirname(current_fpath)
 
         if source_robot_name in {
             "barrett",
@@ -89,7 +91,7 @@ class GcsGraspTransferOpt:
             self._source_gripper_datadir = os.path.expanduser("~/Datasets/GenDexGrasp")
         else:
             self._source_gripper_json_path = "urdf_assets_meta.json"
-            self._source_gripper_datadir = "../grippers/"
+            self._source_gripper_datadir = os.path.join(parent_dir, "../grippers")
 
         self.source_handmodel = get_handmodel(
             source_robot_name,
@@ -112,7 +114,7 @@ class GcsGraspTransferOpt:
             self._target_gripper_datadir = os.path.expanduser("~/Datasets/GenDexGrasp")
         else:
             self._target_gripper_json_path = "urdf_assets_meta.json"
-            self._target_gripper_datadir = "../grippers/"
+            self._target_gripper_datadir = os.path.join(parent_dir, "../grippers")
 
         self.target_handmodel = get_handmodel(
             target_robot_name,
@@ -279,7 +281,7 @@ class GcsGraspTransferOpt:
             # since q_current is actually just the grasp pose, we also need some default dofs to update the kinematics
             sample_dofs = torch.zeros(
                 self.num_particles, len(self.target_handmodel.dynamic_joints)
-            )
+            ).to(self.device)
 
             self.target_handmodel.update_kinematics(
                 q=torch.cat((self.q_current, sample_dofs), dim=1)
@@ -375,7 +377,8 @@ class AdamGraspTransfer:
 
         iters_per_print = self.max_iter // 2
 
-        for i_iter in tqdm(range(self.max_iter), desc=f"{running_name}"):
+        # for i_iter in tqdm(range(self.max_iter), desc=f"{running_name}"):
+        for i_iter in range(self.max_iter):
 
             self.opt_model.step()
 
@@ -383,9 +386,9 @@ class AdamGraspTransfer:
                 opt_q = self.opt_model.get_opt_q()
                 q_trajectory.append(opt_q.clone().detach())
 
-            if i_iter % iters_per_print == 0 or i_iter == self.max_iter - 1:
-                print(f"min energy: {self.opt_model.energy.min(dim=0)[0]:.4f}")
-                print(f"min energy index: {self.opt_model.energy.min(dim=0)[1]}")
+            # if i_iter % iters_per_print == 0 or i_iter == self.max_iter - 1:
+            #     print(f"min energy: {self.opt_model.energy.min(dim=0)[0]:.4f}")
+            #     print(f"min energy index: {self.opt_model.energy.min(dim=0)[1]}")
 
             with torch.no_grad():
                 energy = self.opt_model.energy.detach().cpu().tolist()

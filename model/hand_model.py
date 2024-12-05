@@ -47,7 +47,7 @@ class GcsHandModel:
         visual = URDF.from_xml_string(open(urdf_filename).read())
         self.mesh_verts = {}
         self.mesh_faces = {}
-        
+
         if robot_name in {
             "barrett",
             "allegro",
@@ -475,11 +475,11 @@ class GcsHandModel:
             sorted_indices = torch.argsort(distances, dim=1)
             corr_grp_pts_indices = sorted_indices[:, 0]  # pick the closest
             return corr_grp_pts_indices, obj_mask
-    
+
     def grasp_transfer_correspondence(self, source_gripper_coord, mutual_pairs=True):
-        '''
+        """
         Returns (source_idxs, target_idxs): index mask into source and target with the established correspondence
-        '''
+        """
         grp_coord = self.gripper_coords_all
         # source shape (M,2) ; target shape (N, 2) ; distances shape (M, N)
         distances = self.spherical_distance(source_gripper_coord, grp_coord)
@@ -487,20 +487,23 @@ class GcsHandModel:
         N = grp_coord.shape[0]
         if mutual_pairs:
             # Find mutual pairs i.e indices in M and N which are both closest to eatch other
-            closest_source_to_target = torch.argmin(distances, dim=1) # (M,)
-            closest_target_to_source = torch.argmin(distances, dim=0) # (N,)
+            closest_source_to_target = torch.argmin(distances, dim=1)  # (M,)
+            closest_target_to_source = torch.argmin(distances, dim=0)  # (N,)
             ctc_source = closest_target_to_source[closest_source_to_target]
-            source_idxs = ctc_source[ctc_source == torch.arange(M)]
+            source_idxs = ctc_source[
+                ctc_source == torch.arange(M).to(ctc_source.device)
+            ]
             ctc_target = closest_source_to_target[closest_target_to_source]
-            target_idxs = ctc_target[ctc_target == torch.arange(N)]
+            target_idxs = ctc_target[
+                ctc_target == torch.arange(N).to(ctc_target.device)
+            ]
         else:
             # use all source pts and find corresponding target pts
-            closest_source_to_target = np.argmin(distances, axis=1) # (M,)
+            closest_source_to_target = np.argmin(distances, axis=1)  # (M,)
             source_idxs = np.arange(M)
             target_idxs = closest_source_to_target
-        
-        return source_idxs, target_idxs
 
+        return source_idxs, target_idxs
 
 
 if __name__ == "__main__":
