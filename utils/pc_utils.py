@@ -2,6 +2,29 @@ import cv2
 import numpy as np
 
 
+def filter_outliers(traj, threshold=0.2):
+    """
+    Filters outliers from a list of 4x4 homogeneous matrices.
+    Args:
+        traj (list of np.ndarray): The trajectory as a list of 4x4 matrices.
+        threshold (float): Maximum allowed distance between consecutive poses.
+    Returns:
+        list of np.ndarray: Filtered trajectory.
+    """
+    filtered_traj = [traj[0]]
+
+    for i in range(1, len(traj)):
+        prev_pos = traj[i - 1][:3, 3]
+        curr_pos = traj[i][:3, 3]
+
+        dist = np.linalg.norm(curr_pos - prev_pos)
+
+        if dist <= threshold:
+            filtered_traj.append(traj[i])
+
+    return filtered_traj
+
+
 def load_depth_img(img_path):
     """
     Loads a depth image corresponding to the given image path.
