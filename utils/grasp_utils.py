@@ -163,6 +163,8 @@ def get_gripper_common_alignment(gname: str):
     """
     if gname == "fetch_gripper":
         return quaternion.from_euler_angles([0, -math.pi / 2.0, 0])
+    elif gname == "fetch_gripper_umi":
+        return quaternion.from_euler_angles([0, -math.pi / 2.0, 0])
     elif gname == "sawyer":
         return np.quaternion(1, 0, 0, 0)  # unit quaternion, i.e NO CHANGE NEEDED
     elif gname == "franka_panda":
@@ -190,7 +192,9 @@ def get_gripper_common_alignment(gname: str):
     elif gname == "ezgripper":
         return quaternion.from_euler_angles([0, -math.pi / 2.0, 0])
     elif gname in {"mano_left", "mano_right"}:
-        return get_quat_np(R.from_euler("xyz", [-math.pi / 2, 0, -math.pi / 2]).as_quat())     
+        return get_quat_np(
+            R.from_euler("xyz", [-math.pi / 2, 0, -math.pi / 2]).as_quat()
+        )
     else:
         print("Invalid gripper name. Returning None!")
         raise NotImplementedError
@@ -240,6 +244,8 @@ def get_gripper_palm_position_mgg(gname: str):
     """
     if gname == "fetch_gripper":
         return -1 * np.array([-0.135, 0, 0])
+    elif gname == "fetch_gripper_umi":
+        return -1 * np.array([0.035, 0, 0])
     elif gname == "sawyer":
         return -1 * np.array([0, 0, -0.05])
     elif gname == "franka_panda":
@@ -269,7 +275,7 @@ def get_gripper_palm_position_mgg(gname: str):
     elif gname == "mano_right":
         return -1 * np.array([-0.02, 0.005, 0])
     elif gname == "mano_left":
-        return -1 * np.array([0.02, 0.005, 0])    
+        return -1 * np.array([0.02, 0.005, 0])
     else:
         raise NotImplementedError
 
@@ -298,6 +304,8 @@ def get_gripper_palm_position_isaac_sphere(gname: str):
     """
     if gname == "fetch_gripper":
         return -1 * np.array([-0.1343, 0, 0])
+    elif gname == "fetch_gripper_umi":
+        return -1 * np.array([0.0343, 0, 0])
     elif gname == "sawyer":
         return -1 * np.array([0, 0, -0.0624])
     elif gname == "franka_panda":
@@ -495,12 +503,42 @@ def get_handmodel(
                 urdf_path
             )  # All mesh paths in urdf are relative to this dir
         hand_model = GcsHandModel(
-                robot,
-                urdf_path,
-                meshes_path,
-                urdf_datadir=datadir,
-                batch_size=batch_size,
-                device=device,
-                hand_scale=hand_scale,
-            )
+            robot,
+            urdf_path,
+            meshes_path,
+            urdf_datadir=datadir,
+            batch_size=batch_size,
+            device=device,
+            hand_scale=hand_scale,
+        )
     return hand_model
+
+
+def get_urdf_path(gripper_name):
+    if gripper_name == "fetch_gripper":
+        return "fetch_gripper/fetch_gripper.urdf"
+    elif gripper_name == "fetch_gripper_umi":
+        return "fetch_gripper_umi/fetch_gripper_umi.urdf"
+    elif gripper_name == "Barrett":
+        return "Barrett/Barrett.urdf"
+    elif gripper_name == "HumanHand":
+        return "HumanHand/HumanHand.urdf"
+    elif gripper_name == "Allegro":
+        return "Allegro/allegro_hand_description_right.urdf"
+    elif gripper_name == "franka_panda":
+        return "franka_panda/franka_panda.urdf"
+    elif gripper_name == "jaco_robot":
+        return "jaco_robot/jaco_robot.urdf"
+    elif gripper_name == "robotiq_3finger":
+        return "robotiq_3finger/robotiq_3finger.urdf"
+    elif gripper_name == "wsg_50":
+        return "wsg_50/wsg_50.urdf"
+    elif gripper_name == "shadow_hand":
+        return "shadow_hand/shadow_hand.urdf"
+    elif gripper_name == "sawyer":
+        return "sawyer/sawyer.urdf"
+    elif gripper_name == "h5_hand":
+        return "h5_hand/h5_hand.urdf"
+    else:
+        print("[ERROR]: INVALID Gripper name. Returning empty string!!!")
+        return ""

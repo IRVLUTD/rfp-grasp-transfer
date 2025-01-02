@@ -2,6 +2,7 @@
   "Allegro": 1.0,
   "Barrett": 1.0,
   "fetch_gripper": 1.0,
+  "fetch_gripper_umi": 1.0,
   "franka_panda": 1.0,
   "h5_hand": 1.0,
   "HumanHand": 1.0,
