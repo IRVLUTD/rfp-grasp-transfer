@@ -78,6 +78,8 @@ We have the `mano_pybullet` added as a submodule which you can install by follow
 
 - Check if we need to tweak the correspondences between mano and fetch so that one finger is with thumb and other with middle finger? -- for better transfers and grasping? 
 
+- Run `pip install --upgrade networkx` if urchin URDF loading gives an error.
+
 ## References
 
 The code and idea is adapted from the RobotFingerPrint paper which introduces a unified coordinate system over the gripper interior points.
