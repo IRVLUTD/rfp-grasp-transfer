@@ -51,6 +51,14 @@ We have the `mano_pybullet` added as a submodule which you can install by follow
 
 ## Usage and Examples
 
+- **Gripper Open/Close Heuristice:**
+  - See `notebooks/example_find_grasp_frame.ipynb`
+  - Modify it to store the open/close frames in a json file in the demonstration data dir. 
+  - or any other representation as needed!
+  - NOTE: if using an pre-existing conda env (`mfg2`) for this repo, you just need to update via pip:
+    - `networkx==3.4.2`
+    - `opencv-python`
+
 - Primary Script: `transfer_from_hamer.py`. The main argument will be the demonstration data dir which has subfolders like `rgb, depth, pose` as well as `out/hamer/` for mano hand data from hamer 
   
   - `--input_dir`: path to demo data dir
