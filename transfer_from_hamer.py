@@ -112,8 +112,8 @@ def transfer_grasp_handler(
         source_data_left = extract_source_data(mano_params, translation, left_idxs)
         RT_target_left, fig_left, mesh_left = transfer_grasp(
             source_data_left,
-            source_models.right,
-            manopyb_models.right,
+            source_models.left,
+            manopyb_models.left,
             target_model,
             is_left=True,
         )
@@ -146,8 +146,8 @@ def transfer_grasp_handler(
             source_data = extract_source_data(mano_params, translation, left_idxs)
             RT_target_left, fig_left, mesh_left = transfer_grasp(
                 source_data,
-                source_models.right,
-                manopyb_models.right,
+                source_models.left,
+                manopyb_models.left,
                 target_model,
                 is_left=True,
             )
@@ -168,6 +168,13 @@ def transfer_grasp(
     hand_rot_mat = source_data["hand_rot_mat"]
     hand_theta_mat = source_data["hand_thetas"]
     trans = source_data["translation"]
+
+    if is_left:
+        hand_rot_mat[1::3] *= -1
+        hand_rot_mat[2::3] *= -1
+        hand_theta_mat[1::3] *= -1
+        hand_theta_mat[1::3] *= -1
+
     hand_theta_full = np.array(
         [mat2rvec(hand_rot_mat)]
         + [mat2rvec(hand_theta_mat[i]) for i in range(hand_theta_mat.shape[0])]
@@ -180,23 +187,24 @@ def transfer_grasp(
     actual_trans = np.array(palm_trans)
     actual_basis = np.array(palm_basis)
     if is_left:
-        actual_trans -= trans
-        actual_trans[0] *= -1
-        actual_trans += trans
-
-        r_palm_normal = palm_basis @ np.array([0, -1, 0])
-        r_palm_normal_flip = np.array(r_palm_normal)
-        r_palm_normal_flip[0] *= -1
-        rotmat_flip = rotation_matrix_from_vectors(r_palm_normal, r_palm_normal_flip)
-        actual_basis = rotmat_flip @ palm_basis
+        # actual_trans -= trans
+        # actual_trans[0] *= -1
+        # actual_trans += trans
+        # r_palm_normal = palm_basis @ np.array([0, -1, 0])
+        # r_palm_normal_flip = np.array(r_palm_normal)
+        # r_palm_normal_flip[0] *= -1
+        # rotmat_flip = rotation_matrix_from_vectors(r_palm_normal, r_palm_normal_flip)
+        # actual_basis = rotmat_flip @ palm_basis
+        R_x = np.array([[1, 0, 0], [0, -1, 0], [0, 0, -1]])
+        actual_basis = np.dot(actual_basis, R_x)
 
     grasp_pose = torch.zeros(9)
     # Rotation in 6D representation looks like: (x1,x2,x3, y1,y2,y3) (1st 2 columns from the rot mat)
     grasp_pose[3:] = torch.tensor(actual_basis.T.reshape(-1)[:6])
     grasp_pose[:3] = torch.tensor(actual_trans)
 
-    grasp_dofs = torch.tensor(angles)
-    # grasp_dofs = -1 * torch.tensor(angles) if is_left else torch.tensor(angles)
+    # grasp_dofs = torch.tensor(angles)
+    grasp_dofs = -1 * torch.tensor(angles) if is_left else torch.tensor(angles)
 
     source_grasp_q = (
         torch.cat(
@@ -294,16 +302,18 @@ def main(args):
         )
     # Set the MANO DIR for `mano_pybullet` interfacing
     os.environ["MANO_MODELS_DIR"] = mano_dir
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    # device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = args.device
+    assert device in {"cuda", "cpu"}
 
     # Initiliaze HandModels for mano left/right and target gripper
-    # _source_model_left = get_handmodel(
-    #     "mano_left",
-    #     1,
-    #     device,
-    #     json_path="urdf_assets_meta.json",
-    #     datadir="./grippers/",
-    # )
+    _source_model_left = get_handmodel(
+        "mano_left",
+        1,
+        device,
+        json_path="urdf_assets_meta.json",
+        datadir="./grippers/",
+    )
     _source_model_right = get_handmodel(
         "mano_right",
         1,
@@ -320,12 +330,12 @@ def main(args):
     )
 
     # Initialize Mano Pybullet models for left/right (useful for conversion from mano to urdf equivalent)
-    # _manopyb_left = HandModel20(left_hand=True)
+    _manopyb_left = HandModel20(left_hand=True)
     _manopyb_right = HandModel20(left_hand=False)
 
     # Init the named tuples for mano models (gcs and mano_pybullet)
-    source_models = LeftRightTuple(left=None, right=_source_model_right)
-    manopyb_models = LeftRightTuple(left=None, right=_manopyb_right)
+    source_models = LeftRightTuple(left=_source_model_left, right=_source_model_right)
+    manopyb_models = LeftRightTuple(left=_manopyb_left, right=_manopyb_right)
 
     # Populate a list of hamer output npz files to iterate over and transfer grasp
     npz_files = [
@@ -346,7 +356,7 @@ def main(args):
             f"\n[NOTE] Debuggig arg passed, creating/checking dir:{transfer_extra_dir}.\nConsider deleting it after debugging!\n"
         )
 
-    for npz_f in tqdm(npz_files):
+    for npz_f in tqdm(sorted(npz_files)):
         npz_fpath = osp.join(hamer_npz_dir, npz_f)
         npz_data = dict(
             np.load(npz_fpath, allow_pickle=True)
@@ -433,6 +443,13 @@ def make_parser():
         "--debug_plots",
         action="store_true",
         help="This creates a ~ 5MB html plot for each frame, so only use for debugging and delete its folder after use!",
+    )
+    parser.add_argument(
+        "-d",
+        "--device",
+        type=str,
+        default="cuda",
+        help="Device to run torch optim on, kept default as cuda but change to 'cpu' if needed.",
     )
     return parser
 
