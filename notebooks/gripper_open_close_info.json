@@ -1,0 +1,107 @@
+{
+  "task_10_15s-use-sponge-scrub": {
+    "gripper_close_frame": 29,
+    "gripper_open_frame": 97,
+    "hand_flag": 1
+  },
+  "task_11_17s-use-basting-brush": {
+    "gripper_close_frame": 33,
+    "gripper_open_frame": 118,
+    "hand_flag": 0
+  },
+  "task_12_12s-use-spatula": {
+    "gripper_close_frame": 25,
+    "gripper_open_frame": 77,
+    "hand_flag": 0
+  },
+  "task_13_13s-sprinkle-salt": {
+    "gripper_close_frame": 24,
+    "gripper_open_frame": 89,
+    "hand_flag": 1
+  },
+  "task_14_15s-pouring": {
+    "gripper_close_frame": 28,
+    "gripper_open_frame": 105,
+    "hand_flag": 1
+  },
+  "task_15_19s-use-knife": {
+    "gripper_close_frame": 30,
+    "gripper_open_frame": 136,
+    "hand_flag": 0
+  },
+  "task_16_12s-wipe-table-with-towel": {
+    "gripper_close_frame": 27,
+    "gripper_open_frame": 77,
+    "hand_flag": 0
+  },
+  "task_17_15s-squeeze-sponge-ball": {
+    "gripper_close_frame": 25,
+    "gripper_open_frame": 87,
+    "hand_flag": 0
+  },
+  "task_18_10s-move-chair": {
+    "gripper_close_frame": 33,
+    "gripper_open_frame": 63,
+    "hand_flag": 0
+  },
+  "task_1_shelf-bottle_interval_0.05": {
+    "gripper_close_frame": 55,
+    "gripper_open_frame": 159,
+    "hand_flag": 0
+  },
+  "task_20_microwave-open_interval_0.05": {
+    "gripper_close_frame": 54,
+    "gripper_open_frame": 206,
+    "hand_flag": 1
+  },
+  "task_21_whiteboard-eraser_interval_0.05": {
+    "gripper_close_frame": 80,
+    "gripper_open_frame": 220,
+    "hand_flag": 0
+  },
+  "task_22_water_fill_from_water_cooler": {
+    "gripper_close_frame": 62,
+    "gripper_open_frame": 409,
+    "hand_flag": 0
+  },
+  "task_2_9s-toggle-light-switch": {
+    "gripper_close_frame": 34,
+    "gripper_open_frame": 46,
+    "hand_flag": 0
+  },
+  "task_3_14s-close-jar-with-lid": {
+    "gripper_close_frame": 38,
+    "gripper_open_frame": 71,
+    "hand_flag": 0
+  },
+  "task_4_17s-fold-towel": {
+    "gripper_close_frame": 31,
+    "gripper_open_frame": 94,
+    "hand_flag": 0
+  },
+  "task_5_15s-open-folder": {
+    "gripper_close_frame": 35,
+    "gripper_open_frame": 76,
+    "hand_flag": 0
+  },
+  "task_6_8s-press-keyboard-key": {
+    "gripper_close_frame": 34,
+    "gripper_open_frame": 44,
+    "hand_flag": 0
+  },
+  "task_7_14s-use-cleaning-brush": {
+    "gripper_close_frame": 23,
+    "gripper_open_frame": 89,
+    "hand_flag": 0
+  },
+  "task_8_17s-use_hammer": {
+    "gripper_close_frame": 33,
+    "gripper_open_frame": 107,
+    "hand_flag": 0
+  },
+  "task_9-use-stapler": {
+    "gripper_close_frame": 26,
+    "gripper_open_frame": 69,
+    "hand_flag": 1
+  }
+}
