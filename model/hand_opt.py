@@ -319,6 +319,7 @@ class HandObjectGraspOpt:
         energy_func_name="euclidean_dist",
         device="cuda" if torch.cuda.is_available() else "cpu",
         collision_weight=100,
+        contact_weight=1,
         opt_only_trans=True,
     ):
         """
@@ -357,6 +358,7 @@ class HandObjectGraspOpt:
         self.q_current = None
         self.energy = None
         self.collision_weight = collision_weight
+        self.contact_weight = contact_weight
         self.compute_energy = None
         self.opt_only_trans = opt_only_trans
 
@@ -549,7 +551,10 @@ class HandObjectGraspOpt:
         energy_penetration = (hand_object_signs * hand_object_dist).mean(dim=1)
 
         ######################### Compute Total Energy #################################
-        energy = energy_contact + self.collision_weight * energy_penetration
+        energy = (
+            self.contact_weight * energy_contact
+            + self.collision_weight * energy_penetration
+        )
 
         if not self.opt_only_pose:
             # TODO: add a normalized energy?
@@ -657,7 +662,10 @@ class HandObjectGraspOpt:
         energy_penetration = (hand_object_signs * hand_object_dist).mean(dim=1)
 
         ######################### Compute Total Energy #################################
-        energy = energy_contact + self.collision_weight * energy_penetration
+        energy = (
+            self.contact_weight * energy_contact
+            + self.collision_weight * energy_penetration
+        )
 
         if not self.opt_only_pose:
             # TODO: add a normalized energy?
@@ -825,6 +833,7 @@ class AdamGraspCmap:
         self,
         target_robot_name,
         collision_weight,
+        contact_weight,
         opt_only_trans,
         source_grasp=None,
         num_particles=32,
@@ -856,6 +865,7 @@ class AdamGraspCmap:
             energy_func_name=self.energy_func_name,
             device=device,
             collision_weight=collision_weight,
+            contact_weight=contact_weight,
             opt_only_trans=opt_only_trans,
         )
 
