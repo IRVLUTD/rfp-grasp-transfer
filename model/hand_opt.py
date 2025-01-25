@@ -321,6 +321,7 @@ class HandObjectGraspOpt:
         collision_weight=100,
         contact_weight=1,
         opt_only_trans=True,
+        sharp_factor=20,
     ):
         """
         source_robot_name: str
@@ -361,6 +362,7 @@ class HandObjectGraspOpt:
         self.contact_weight = contact_weight
         self.compute_energy = None
         self.opt_only_trans = opt_only_trans
+        self.sharp_factor = sharp_factor
 
         self.grp_corr_idxs = None
         # self.q_local = None
@@ -508,8 +510,9 @@ class HandObjectGraspOpt:
         object_hand_dist = (hand_surface_points - batch_object_point_cloud).norm(dim=3)
 
         contact_dist = object_hand_dist.min(dim=2)[0]
-        # contact_value_current = 1 - 2 * (torch.sigmoid(100 * contact_dist) - 0.5)
-        contact_value_current = 1 - 2 * (torch.sigmoid(contact_dist) - 0.5)
+        contact_value_current = 1 - 2 * (
+            torch.sigmoid(self.sharp_factor * contact_dist) - 0.5
+        )
         energy_contact = torch.abs(
             contact_value_current - self.contact_value_goal.reshape(1, -1)
         ).mean(dim=1)
@@ -621,8 +624,9 @@ class HandObjectGraspOpt:
 
         contact_dist = torch.sqrt(object_hand_align_dist.min(dim=2)[0])
         # contact_dist = object_hand_align_dist.min(dim=2)[0]
-        # contact_value_current = 1 - 2 * (torch.sigmoid(10 * contact_dist) - 0.5)
-        contact_value_current = 1 - 2 * (torch.sigmoid(contact_dist) - 0.5)
+        contact_value_current = 1 - 2 * (
+            torch.sigmoid(self.sharp_factor * contact_dist) - 0.5
+        )
         energy_contact = torch.abs(
             contact_value_current - self.contact_value_goal.view(1, -1)
         ).mean(dim=1)
@@ -835,6 +839,7 @@ class AdamGraspCmap:
         collision_weight,
         contact_weight,
         opt_only_trans,
+        sharp_factor=20,
         source_grasp=None,
         num_particles=32,
         init_rand_scale=0.5,
