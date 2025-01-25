@@ -506,7 +506,8 @@ class HandObjectGraspOpt:
         object_hand_dist = (hand_surface_points - batch_object_point_cloud).norm(dim=3)
 
         contact_dist = object_hand_dist.min(dim=2)[0]
-        contact_value_current = 1 - 2 * (torch.sigmoid(100 * contact_dist) - 0.5)
+        # contact_value_current = 1 - 2 * (torch.sigmoid(100 * contact_dist) - 0.5)
+        contact_value_current = 1 - 2 * (torch.sigmoid(contact_dist) - 0.5)
         energy_contact = torch.abs(
             contact_value_current - self.contact_value_goal.reshape(1, -1)
         ).mean(dim=1)
@@ -615,7 +616,8 @@ class HandObjectGraspOpt:
 
         contact_dist = torch.sqrt(object_hand_align_dist.min(dim=2)[0])
         # contact_dist = object_hand_align_dist.min(dim=2)[0]
-        contact_value_current = 1 - 2 * (torch.sigmoid(10 * contact_dist) - 0.5)
+        # contact_value_current = 1 - 2 * (torch.sigmoid(10 * contact_dist) - 0.5)
+        contact_value_current = 1 - 2 * (torch.sigmoid(contact_dist) - 0.5)
         energy_contact = torch.abs(
             contact_value_current - self.contact_value_goal.view(1, -1)
         ).mean(dim=1)
