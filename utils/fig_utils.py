@@ -13,8 +13,18 @@ import plotly.graph_objects as go
 # TODO: map uv map to colors
 
 
+def plot_point_cloud(pts, color="green", size=3, opacity=0.7):
+    return go.Scatter3d(
+        x=pts[:, 0],
+        y=pts[:, 1],
+        z=pts[:, 2],
+        mode="markers",
+        marker={"color": color, "size": size, "opacity": opacity},
+    )
+
+
 def plot_point_cloud_cmap(pts, color_levels=None, size=6.5):
-    colors = cmap_colors(color_levels) if color_levels else "green"
+    colors = cmap_colors(color_levels) if color_levels is not None else "green"
     return go.Scatter3d(
         x=pts[:, 0],
         y=pts[:, 1],
