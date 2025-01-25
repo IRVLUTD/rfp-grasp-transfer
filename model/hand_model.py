@@ -42,6 +42,27 @@ class GcsHandModel:
         self.global_rotation = None
         self.softmax = torch.nn.Softmax(dim=-1)
 
+        self.full_mesh_pts = None
+        if robot_name == "fetch_gripper":
+            full_gripper_mesh = trimesh.load(
+                os.path.join(mesh_path, f"{robot_name}_base_pose.obj")
+            )
+            full_mesh_pts = np.array(
+                trimesh.sample.sample_surface_even(
+                    mesh=full_gripper_mesh.copy(),
+                    count=512,
+                    seed=42,
+                )[0]
+            )
+            # Create a batched tensor
+            self.full_mesh_pts = (
+                torch.from_numpy(full_mesh_pts)
+                .to(device)
+                .float()
+                .unsqueeze(0)
+                .repeat(batch_size, 1, 1)
+            )
+
         self.surface_points = {}
         self.surface_points_normal = {}
         visual = URDF.from_xml_string(open(urdf_filename).read())
@@ -260,6 +281,17 @@ class GcsHandModel:
         # if downsample:
         #     surface_points = surface_points[:, torch.randperm(surface_points.shape[1])][:, :778]
         return surface_points * self.scale
+
+    def get_fullmesh_points(self, q=None):
+        if self.full_mesh_pts is None:
+            raise NotImplementedError
+        if q is not None:
+            self.update_kinematics(q)
+        mesh_pts = self.full_mesh_pts.clone()
+        mesh_pts = torch.matmul(
+            self.global_rotation, mesh_pts.transpose(1, 2)
+        ).transpose(1, 2) + self.global_translation.unsqueeze(1)
+        return mesh_pts
 
     def get_surface_points(self, q=None, downsample=True):
         if q is not None:
