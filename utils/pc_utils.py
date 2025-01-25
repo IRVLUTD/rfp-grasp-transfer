@@ -1,5 +1,110 @@
 import cv2
 import numpy as np
+import open3d as o3d
+from scipy.spatial.distance import cdist
+
+
+def compute_contact_map(gripper_pts, obj_pts, sharp_factor):
+    pairwise_distances = cdist(obj_pts, gripper_pts)
+    distances = np.min(pairwise_distances, axis=1)
+
+    # contact_m = 1 - 2 * (sigmoid(100 * distances))
+    contact_m = 2 / (1 + np.exp(sharp_factor * distances))
+    return contact_m
+
+
+def compute_contact_map_aligned(gripper_pts, obj_pts, obj_normals, sharp_factor):
+    pairwise_distances = cdist(obj_pts, gripper_pts)
+
+    pairwise_differences = obj_pts[:, np.newaxis] - gripper_pts
+    pairwise_alignments = np.sum(
+        pairwise_differences * obj_normals[:, np.newaxis, :], axis=-1
+    )
+    pairwise_alignments = np.exp(1 - pairwise_alignments)
+
+    distances = np.min(pairwise_distances * pairwise_alignments, axis=1)
+    contact_m = 2 / (1 + np.exp(sharp_factor * distances))
+    return contact_m
+
+
+def apply_extrinsics(points, RT_camera):
+    """
+    Transform the point cloud using the camera extrinsics.
+
+    Args:
+        points: (N,3) numpy array.
+        RT_camera: (4,4) tf (rotation and translation) for camera
+
+    Returns:
+        Transformed Open3D PointCloud object.
+    """
+    rotation = RT_camera[:3, :3]
+    translation = RT_camera[:3, 3]
+    transformed_points = (rotation @ points.T).T + translation.T
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(transformed_points)
+    return pcd
+
+
+def estimate_normals_with_open3d(point_cloud, camera_position=None):
+    """
+    Estimate normals of a point cloud and orient them.
+
+    Args:
+        point_cloud: Open3D PointCloud object.
+        camera_position: Optional 3x1 numpy array of camera position for normal orientation.
+
+    Returns:
+        Point cloud with estimated normals.
+    """
+    # Estimate normals
+    point_cloud.estimate_normals(
+        search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30)
+    )
+
+    # Orient normals towards the camera or in a consistent direction
+    if camera_position is not None:
+        point_cloud.orient_normals_towards_camera_location(camera_position)
+    else:
+        point_cloud.orient_normals_consistent_tangent_plane(k=30)
+
+    return point_cloud
+
+
+def transform_to_camera_frame(point_cloud, RT_camera):
+    """
+    Transform both points and normals from the world frame to the camera frame.
+
+    Args:
+        point_cloud: Open3D PointCloud object with estimated normals.
+        rotation: 3x3 numpy array representing the rotation matrix of the camera extrinsics.
+        translation: 3x1 numpy array representing the translation vector of the camera extrinsics.
+
+    Returns:
+        Open3D PointCloud object with points and normals in the camera frame.
+    """
+    # Get points and normals from the point cloud
+    points = np.asarray(point_cloud.points)
+    normals = np.asarray(point_cloud.normals)
+
+    rotation = RT_camera[:3, :3]
+    translation = RT_camera[:3, 3]
+    translation = translation.reshape(1, 3)
+
+    # Compute inverse rotation matrix
+    rotation_inverse = rotation.T  # Inverse of rotation (R^-1)
+
+    # Transform points to the camera frame
+    transformed_points = (rotation_inverse @ (points - translation).T).T
+
+    # Transform normals to the camera frame
+    transformed_normals = (rotation_inverse @ normals.T).T
+
+    # Update the point cloud with transformed points and normals
+    tf_pcd = o3d.geometry.PointCloud()
+    tf_pcd.points = o3d.utility.Vector3dVector(transformed_points)
+    tf_pcd.normals = o3d.utility.Vector3dVector(transformed_normals)
+    return tf_pcd
 
 
 def filter_outliers(traj, threshold=0.2):
