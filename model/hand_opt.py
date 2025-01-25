@@ -319,6 +319,7 @@ class HandObjectGraspOpt:
         energy_func_name="euclidean_dist",
         device="cuda" if torch.cuda.is_available() else "cpu",
         collision_weight=100,
+        opt_only_trans=True,
     ):
         """
         source_robot_name: str
@@ -357,6 +358,7 @@ class HandObjectGraspOpt:
         self.energy = None
         self.collision_weight = collision_weight
         self.compute_energy = None
+        self.opt_only_trans = opt_only_trans
 
         self.grp_corr_idxs = None
         # self.q_local = None
@@ -391,7 +393,7 @@ class HandObjectGraspOpt:
         self.q_joint_upper = self.target_handmodel.dynamic_joints_q_upper.detach()
 
         # We optimize only for the pose if the gripper is two finger gripper
-        self.only_pose_opt = target_robot_name in {
+        self.opt_only_pose = target_robot_name in {
             "fetch_gripper",
             "franka_panda",
             "wsg_50",
@@ -444,14 +446,14 @@ class HandObjectGraspOpt:
         self.contact_value_goal = contact_map_goal[:, 6].to(self.device)
         self.object_radius = torch.max(torch.norm(self.object_point_cloud, dim=1, p=2))
 
-        self.source_grasp = source_grasp.to(self.device)
+        self.source_grasp = source_grasp.clone().to(self.device)
         # Pose Init --> initialize as the source pose
         # initialize the opt for grasp = (posn, rotn, dof joints)
         q_pose = torch.zeros(self.num_particles, 9, device=self.device)
-        q_pose[:, 0:3] = self.source_grasp[0:3].repeat(self.num_particles, 1)
-        q_pose[:, 3:9] = self.source_grasp[3:9].repeat(self.num_particles, 1)
+        q_pose[:, 0:3] = self.source_grasp[0:3].clone().repeat(self.num_particles, 1)
+        q_pose[:, 3:9] = self.source_grasp[3:9].clone().repeat(self.num_particles, 1)
 
-        if not self.only_pose_opt:
+        if not self.opt_only_pose:
             # DOFs initialization
             # Set the dof values to be initialized between (lower, lower + range * rand_0_1 * scale)
             self.q_current = torch.zeros(
@@ -548,7 +550,7 @@ class HandObjectGraspOpt:
         ######################### Compute Total Energy #################################
         energy = energy_contact + self.collision_weight * energy_penetration
 
-        if not self.only_pose_opt:
+        if not self.opt_only_pose:
             # TODO: add a normalized energy?
             z_norm = F.relu(self.q_current[:, 9:] - self.q_joint_upper) + F.relu(
                 self.q_joint_lower - self.q_current[:, 9:]
@@ -655,7 +657,7 @@ class HandObjectGraspOpt:
         ######################### Compute Total Energy #################################
         energy = energy_contact + self.collision_weight * energy_penetration
 
-        if not self.only_pose_opt:
+        if not self.opt_only_pose:
             # TODO: add a normalized energy?
             z_norm = F.relu(self.q_current[:, 9:] - self.q_joint_upper) + F.relu(
                 self.q_joint_lower - self.q_current[:, 9:]
@@ -668,15 +670,26 @@ class HandObjectGraspOpt:
 
     def step(self):
         self.optimizer.zero_grad()
-        if self.only_pose_opt:
+
+        if self.opt_only_pose:
             # since q_current is actually just the grasp pose, we also need some default dofs to update the kinematics
             sample_dofs = torch.zeros(
                 self.num_particles, len(self.target_handmodel.dynamic_joints)
             ).to(self.device)
 
-            self.target_handmodel.update_kinematics(
-                q=torch.cat((self.q_current, sample_dofs), dim=1)
-            )
+            if self.opt_only_trans:
+                grasp_q = torch.cat(
+                    [
+                        self.q_current[:, :3],
+                        self.source_grasp[3:9].clone().repeat(self.num_particles, 1),
+                        sample_dofs,
+                    ],
+                    dim=1,
+                )
+            else:
+                grasp_q = torch.cat((self.q_current, sample_dofs), dim=1)
+
+            self.target_handmodel.update_kinematics(q=grasp_q)
         else:
             self.target_handmodel.update_kinematics(q=self.q_current)
 
@@ -809,6 +822,8 @@ class AdamGraspCmap:
     def __init__(
         self,
         target_robot_name,
+        collision_weight,
+        opt_only_trans,
         source_grasp=None,
         num_particles=32,
         init_rand_scale=0.5,
@@ -818,7 +833,6 @@ class AdamGraspCmap:
         device="cuda",
         energy_func_name="euclidean_dist",
         writer=None,
-        collision_weight=100,
     ):
         self.writer = writer
         self.target_robot_name = target_robot_name
@@ -840,6 +854,7 @@ class AdamGraspCmap:
             energy_func_name=self.energy_func_name,
             device=device,
             collision_weight=collision_weight,
+            opt_only_trans=opt_only_trans,
         )
 
     def run_adam(self, contact_map_goal, source_grasp, running_name):
