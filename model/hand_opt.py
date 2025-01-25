@@ -422,11 +422,12 @@ class HandObjectGraspOpt:
             json_path=self._target_gripper_json_path,
             datadir=self._target_gripper_datadir,
         )
-        if energy_func_name not in {"euclidean_dist"}:
+        if energy_func_name not in {"euclidean_dist", "align_dist"}:
             raise NotImplementedError
 
         energy_func_map = {
             "euclidean_dist": self.compute_energy_euclidean_dist,
+            "align_dist": self.compute_energy_align_dist,
         }
 
         self.compute_energy = energy_func_map[energy_func_name]
@@ -560,12 +561,15 @@ class HandObjectGraspOpt:
 
     def compute_energy_align_dist(self):
 
+        hand_mesh_points = self.target_handmodel.get_fullmesh_points()
+        hand_mesh_points_ = self.target_handmodel.get_fullmesh_points().clone()
+
         hand_surface_points = self.target_handmodel.get_surface_points().clone()
         hand_surface_points_ = hand_surface_points.clone()
-        num_particles = self.num_particles
 
         npts_object = self.object_point_cloud.size()[0]
         npts_hand = hand_surface_points.size()[1]
+        npts_hand_mesh = hand_mesh_points.size()[1]
 
         ############ Compute Contact Value ##################
         with torch.no_grad():
@@ -625,14 +629,16 @@ class HandObjectGraspOpt:
         batch_object_point_cloud = batch_object_point_cloud.reshape(
             self.num_particles, 1, npts_object, 3
         )
-        hand_surface_points = hand_surface_points_.reshape(
-            self.num_particles, 1, npts_hand, 3
+        hand_mesh_points = hand_mesh_points_.reshape(
+            self.num_particles, 1, npts_hand_mesh, 3
         )
-        hand_surface_points = hand_surface_points.repeat(
-            1, npts_object, 1, 1
-        ).transpose(1, 2)
-        batch_object_point_cloud = batch_object_point_cloud.repeat(1, npts_hand, 1, 1)
-        hand_object_dist = (hand_surface_points - batch_object_point_cloud).norm(dim=3)
+        hand_mesh_points = hand_mesh_points.repeat(1, npts_object, 1, 1).transpose(1, 2)
+
+        batch_object_point_cloud = batch_object_point_cloud.repeat(
+            1, npts_hand_mesh, 1, 1
+        )
+
+        hand_object_dist = (hand_mesh_points - batch_object_point_cloud).norm(dim=3)
         hand_object_dist, hand_object_indices = hand_object_dist.min(dim=2)
         hand_object_points = torch.stack(
             [self.object_point_cloud[x, :] for x in hand_object_indices], dim=0
@@ -641,7 +647,7 @@ class HandObjectGraspOpt:
             [self.object_normal_cloud[x, :] for x in hand_object_indices], dim=0
         )
         hand_object_signs = (
-            (hand_object_points - hand_surface_points_) * hand_object_normal
+            (hand_object_points - hand_mesh_points_) * hand_object_normal
         ).sum(dim=2)
         hand_object_signs = (hand_object_signs > 0).float()
         energy_penetration = (hand_object_signs * hand_object_dist).mean(dim=1)
