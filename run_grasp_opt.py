@@ -103,11 +103,6 @@ def optimize_grasp(
         obj_pc, gripper_pts, dist_threshold=THRESHOLD_DIST_LOCAL, count=1000
     )
 
-    ############ VIZ: Local Obj PC region and Gripper Pts used for determination #########
-    fig = viz_obj_pc_with_grasps(obj_pc_subset, RT_current, RT_old)
-    fig.show()
-    ######################################################################
-
     ########## Object PC Normals & ContactMap ##########
     objpcd_with_normals_in_world = estimate_normals_with_open3d(
         apply_extrinsics(obj_pc_subset, RT_camera), RT_camera[:3, 3]
@@ -144,7 +139,13 @@ def optimize_grasp(
     # ############# VIZ: Local Obj PC region and Gripper Pts + Contact Map #############
     vis_data = []
     vis_data += [plot_point_cloud_cmap(objpc_pts, color_levels=contact_map, size=3)]
-    vis_data += [plot_point_cloud(gripper_pts, color="gray", size=3, opacity=0.3)]
+    vis_data += [
+        plot_trimesh_mesh(
+            fetch_gripper_mesh.copy().apply_transform(RT_current),
+            color="gray",
+            opacity=0.8,
+        )
+    ]
     fig = go.Figure(data=vis_data)
     fig.show()
     # #############################################################################
@@ -199,14 +200,14 @@ def optimize_grasp(
         plot_trimesh_mesh(
             fetch_gripper_mesh.copy().apply_transform(RT_current),
             color="red",
-            opacity=0.8,
+            opacity=0.6,
         )
     ]
     vis_data += [
         plot_trimesh_mesh(
             fetch_gripper_mesh.copy().apply_transform(RT_optimized_grasp),
             color="lightgreen",
-            opacity=0.8,
+            opacity=0.6,
         )
     ]
     fig = go.Figure(data=vis_data)
@@ -225,7 +226,7 @@ def make_parser():
         default="/home/ninad/Datasets/MMDemo/newCamK",
     )
     parser.add_argument(
-        "--task_name",
+        "--task_id",
         type=str,
         help="Task Name to run the test on",
         default="task_18_10s-move-chair",
@@ -234,6 +235,7 @@ def make_parser():
         "--frame_id",
         type=int,
         help="Frame ID of the grasp to perturb/distrub and test the optimization on",
+        default=31,
     )
     return parser
 
@@ -242,7 +244,7 @@ if __name__ == "__main__":
 
     ########## testing code ###########
     parser = make_parser()
-    args = parser.parse_args
+    args = parser.parse_args()
     tasks_dir = args.dataset_dir
     task_id = args.task_id
     frame_id = args.frame_id
