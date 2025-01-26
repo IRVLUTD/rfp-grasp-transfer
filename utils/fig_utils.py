@@ -13,13 +13,48 @@ import plotly.graph_objects as go
 # TODO: map uv map to colors
 
 
-def plot_point_cloud_cmap(pts, color_levels=None):
+def viz_obj_pc_with_grasps(obj_pc, gripper_mesh, RT_grasp_bad, RT_grasp_good):
+    """
+    Returns a plotly fig with object pc, and fetch gripper mesh at provided RT grasps
+    """
+    vis_data = []
+    vis_data += [
+        plot_trimesh_mesh(
+            gripper_mesh.copy().apply_transform(RT_grasp_good),
+            color="lightgreen",
+            opacity=0.8,
+        )
+    ]
+    vis_data += [
+        plot_trimesh_mesh(
+            gripper_mesh.copy().apply_transform(RT_grasp_bad),
+            color="red",
+            opacity=0.8,
+        )
+    ]
+    vis_data += [plot_point_cloud(obj_pc)]
+    fig = go.Figure(data=vis_data)
+    return fig
+
+
+def plot_point_cloud(pts, color="green", size=3, opacity=0.7):
     return go.Scatter3d(
         x=pts[:, 0],
         y=pts[:, 1],
         z=pts[:, 2],
         mode="markers",
-        marker={"color": cmap_colors(color_levels), "size": 6.5, "opacity": 1},
+        marker={"color": color, "size": size, "opacity": opacity},
+    )
+
+
+def plot_point_cloud_cmap(pts, color_levels=None, size=6.5):
+    colors = cmap_colors(color_levels) if color_levels is not None else "green"
+    return go.Scatter3d(
+        x=pts[:, 0],
+        y=pts[:, 1],
+        z=pts[:, 2],
+        mode="markers",
+        marker={"color": colors, "size": size, "opacity": 1},
     )
 
 

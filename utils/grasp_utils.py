@@ -12,6 +12,24 @@ from scipy.spatial.transform import Rotation as R
 
 from model.hand_model import GcsHandModel
 
+from .rot6d_utils import robust_compute_rotation_matrix_from_ortho6d
+
+
+def convert_9dGrasp_to_RT(q_grasp):
+    # Convert the target grasp q (9-dim) to 4x4 pose transform RT
+    target_rot6d = q_grasp[3:9]
+    target_trans = q_grasp[:3].cpu().numpy()
+    target_rot_mat = (
+        robust_compute_rotation_matrix_from_ortho6d(target_rot6d.unsqueeze(0))
+        .squeeze(1)
+        .cpu()
+        .numpy()
+    )
+    RT_grasp = np.eye(4)
+    RT_grasp[:3, :3] = target_rot_mat
+    RT_grasp[:3, 3] = target_trans
+    return RT_grasp
+
 
 def rotation_matrix_from_vectors(vec1, vec2):
     """Returns the rotation matrix that aligns vec1 to vec2
