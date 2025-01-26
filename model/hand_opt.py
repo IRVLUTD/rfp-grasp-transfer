@@ -450,12 +450,21 @@ class HandObjectGraspOpt:
         self.contact_value_goal = contact_map_goal[:, 6].to(self.device)
         self.object_radius = torch.max(torch.norm(self.object_point_cloud, dim=1, p=2))
 
-        self.source_grasp = source_grasp.clone().to(self.device)
+        self.source_grasp = source_grasp.detach().clone().to(self.device)
         # Pose Init --> initialize as the source pose
         # initialize the opt for grasp = (posn, rotn, dof joints)
         q_pose = torch.zeros(self.num_particles, 9, device=self.device)
-        q_pose[:, 0:3] = self.source_grasp[0:3].clone().repeat(self.num_particles, 1)
-        q_pose[:, 3:9] = self.source_grasp[3:9].clone().repeat(self.num_particles, 1)
+        q_pose[:, 0:3] = (
+            self.source_grasp[0:3].detach().clone().repeat(self.num_particles, 1)
+        )
+        q_pose[:, 3:9] = (
+            self.source_grasp[3:9].detach().clone().repeat(self.num_particles, 1)
+        )
+
+        # randomly perturb the translation
+        perturbation_scale = 1e-2
+        noise = torch.randn_like(q_pose[:, :3]) * perturbation_scale
+        q_pose[:, :3] += noise
 
         if not self.opt_only_pose:
             # DOFs initialization
@@ -465,7 +474,7 @@ class HandObjectGraspOpt:
                 3 + 6 + len(self.target_handmodel.dynamic_joints),
                 device=self.device,
             )
-            self.q_current[:, :9] = q_pose.clone()
+            self.q_current[:, :9] = q_pose.detach().clone()
             self.q_current[:, 9:] = (
                 self.init_random_scale
                 * torch.rand_like(self.q_current[:, 9:])
@@ -478,7 +487,7 @@ class HandObjectGraspOpt:
                 9,
                 device=self.device,
             )
-            self.q_current[:, :9] = q_pose.clone()
+            self.q_current[:, :9] = q_pose.detach().clone()
         self.q_current.requires_grad = True
         self.optimizer = torch.optim.Adam([self.q_current], lr=self.learning_rate)
 
@@ -486,7 +495,7 @@ class HandObjectGraspOpt:
         hand_mesh_points = self.target_handmodel.get_fullmesh_points()
         hand_mesh_points_ = self.target_handmodel.get_fullmesh_points().clone()
         hand_surface_points = self.target_handmodel.get_surface_points()
-        hand_surface_points_ = hand_surface_points.clone()
+        # hand_surface_points_ = hand_surface_points.detach().clone()
 
         npts_object = self.object_point_cloud.size()[0]
         npts_hand_surf = hand_surface_points.size()[1]
@@ -575,8 +584,8 @@ class HandObjectGraspOpt:
         hand_mesh_points = self.target_handmodel.get_fullmesh_points()
         hand_mesh_points_ = self.target_handmodel.get_fullmesh_points().clone()
 
-        hand_surface_points = self.target_handmodel.get_surface_points().clone()
-        hand_surface_points_ = hand_surface_points.clone()
+        hand_surface_points = self.target_handmodel.get_surface_points()
+        # hand_surface_points_ = hand_surface_points.clone()
 
         npts_object = self.object_point_cloud.size()[0]
         npts_hand = hand_surface_points.size()[1]
@@ -695,7 +704,10 @@ class HandObjectGraspOpt:
                 grasp_q = torch.cat(
                     [
                         self.q_current[:, :3],
-                        self.source_grasp[3:9].clone().repeat(self.num_particles, 1),
+                        self.source_grasp[3:9]
+                        .detach()
+                        .clone()
+                        .repeat(self.num_particles, 1),
                         sample_dofs,
                     ],
                     dim=1,
@@ -884,7 +896,7 @@ class AdamGraspCmap:
 
         with torch.no_grad():
             opt_q = self.opt_model.get_opt_q()
-            q_trajectory.append(opt_q.clone().detach())
+            q_trajectory.append(opt_q.detach().clone().detach())
 
         iters_per_print = self.max_iter // 2
 
@@ -895,7 +907,7 @@ class AdamGraspCmap:
 
             with torch.no_grad():
                 opt_q = self.opt_model.get_opt_q()
-                q_trajectory.append(opt_q.clone().detach())
+                q_trajectory.append(opt_q.detach().clone().detach())
 
             # if i_iter % iters_per_print == 0 or i_iter == self.max_iter - 1:
             #     print(f"min energy: {self.opt_model.energy.min(dim=0)[0]:.4f}")
@@ -920,7 +932,7 @@ class AdamGraspCmap:
         q_trajectory = torch.stack(q_trajectory, dim=0).transpose(0, 1)
         return (
             q_trajectory,
-            self.opt_model.energy.detach().cpu().clone(),
+            self.opt_model.energy.detach().clone().cpu(),
             self.steps_per_iter,
         )
 

@@ -287,7 +287,7 @@ class GcsHandModel:
             raise NotImplementedError
         if q is not None:
             self.update_kinematics(q)
-        mesh_pts = self.full_mesh_pts.clone()
+        mesh_pts = self.full_mesh_pts.detach().clone()
         mesh_pts = torch.matmul(
             self.global_rotation, mesh_pts.transpose(1, 2)
         ).transpose(1, 2) + self.global_translation.unsqueeze(1)
