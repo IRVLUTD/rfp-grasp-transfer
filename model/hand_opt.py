@@ -462,7 +462,7 @@ class HandObjectGraspOpt:
         )
 
         # randomly perturb the translation
-        perturbation_scale = 1e-2
+        perturbation_scale = 5e-3
         noise = torch.randn_like(q_pose[:, :3]) * perturbation_scale
         q_pose[:, :3] += noise
 
