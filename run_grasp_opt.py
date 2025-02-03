@@ -64,6 +64,7 @@ def optimize_grasp(
     device: str,
     target_gripper: str = "fetch_gripper",
     threshold_dist_local: float = 0.1,
+    standoff_dist: float = 0.05,
     energy_func: str = "align_dist",
     sharp_factor: float = 10,
     weight_collision: float = 1,
@@ -71,9 +72,19 @@ def optimize_grasp(
     optimize_only_translation: bool = False,
     num_opt_iters: int = 100,
 ) -> np.array:
+    """
+    Run grasp opt given a current gripper pose and target object point cloud
+
+    Input:
+     - obj_pc: (N, 3) numpy array in camera frame
+     - RT_camera: (4,4) camera pose (extrinsics)
+     - RT_current: (4,4) gripper pose in camera frame
+
+    """
 
     # Collect params and flags
     THRESHOLD_DIST_LOCAL = threshold_dist_local
+    STANDOFF_DIST = standoff_dist
     ENERGY_FUNC = energy_func
     SHARP_FACTOR = sharp_factor
     WT_COLLISION = weight_collision
@@ -115,8 +126,9 @@ def optimize_grasp(
     objpc_nrm = np.asarray(objpcd_with_normals_in_camera.normals)
 
     ## The standoff for the "colliding" grasp will the Source Grasp in GraspOpt
+    ## NOTE: negative sign since we want to go back along palm normal for standoff
     RT_standoff = test_data_utils.translate_grasp_along_palm_normal(
-        RT_current, delta=-0.05
+        RT_current, delta=-STANDOFF_DIST
     )
     q_standoff_grasp = get_q(RT_standoff, target_model)
     q_current_grasp = get_q(RT_current, target_model)
