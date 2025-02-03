@@ -276,13 +276,18 @@ if __name__ == "__main__":
     npz_data = logged_data["npz_data"]
     obj_pc_first_view = logged_data["obj_pc_first_view"]
     RT_camera = logged_data["RT_camera"]
-    RT_old = logged_data["RT_old"]
+    RT_gripper_old = logged_data[
+        "RT_old"
+    ]  # transferred gripper pose that is logged in npz
 
     # NOTE: Perturb the given gripper pose
     # RT_current here reflect what we might see in real world,
     # i.e a potentially bad grasp pose
     # We obtain it by translating in +x by some distance 0.05m (reverse of standoff)
-    RT_current = test_data_utils.translate_grasp_along_palm_normal(RT_old, delta=0.05)
+    perturb_delta = 0.01
+    RT_current = test_data_utils.translate_grasp_along_palm_normal(
+        RT_gripper_old, delta=perturb_delta
+    )
     ################## End Loading of Dummy Data ###############
 
     # NOTE: Load any real world data here if needed

@@ -113,7 +113,7 @@ def get_npz_data(tasks_dir, task_id, frame_id):
     ########### Load RT_Gripper ###########
     RT_gripper_list = npz_data["target_transfer_pose"]
 
-    # NOTE: JUST USING THE FIRST ELEMENT, CAN LEFT/RIGHT IDX ALSO
+    # NOTE: JUST USING THE FIRST ELEMENT, CAN LEFT/RIGHT IDX ALSO for correctness
     RT_gripper = RT_gripper_list[0]
 
     ########### Dict for all relevant data ###########
@@ -121,7 +121,7 @@ def get_npz_data(tasks_dir, task_id, frame_id):
         "npz_data": npz_data,
         "RT_camera": RT_camera,
         "obj_pc_first_view": obj_pc_first_view,
-        "RT_old": RT_gripper,
+        "RT_old": RT_gripper,  # OLD (potentially bad grasp pose)
     }
 
     return logged_data
