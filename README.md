@@ -88,6 +88,20 @@ We have the `mano_pybullet` added as a submodule which you can install by follow
 
 - Run `pip install --upgrade networkx` if urchin URDF loading gives an error.
 
+### Other Ideas
+
+Idea - 1:
+- shoot rays from current gripper pose surface pts to object point cloud
+- check for intersecting obj pts
+- check for alignment between ray and pt normal (to eliminate colliding obj pts)
+- utilize the filtered uv map on obj surface for the optimization
+
+Idea - 2:
+- check for obj pts in the inside region of gripper finger space
+- optimize to get almost all obj pts inside the region
+- only allow trans in y, z dirns
+- only allow rotation around palm normal axis (+x for fetch gripper)
+
 ## References
 
 The code and idea is adapted from the RobotFingerPrint paper which introduces a unified coordinate system over the gripper interior points.
