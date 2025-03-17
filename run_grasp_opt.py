@@ -273,15 +273,26 @@ if __name__ == "__main__":
     RT_current = test_data_utils.translate_grasp_along_palm_normal(RT_old, delta=0.05)
     ################## End Loading of Dummy Data ###############
 
-    # NOTE: Load any real world data here if needed
-    # NOTE: Can also add saving the RT_opt_grasp here if needed
+    else:
+        import rospy
+
+        rospy.init_node("testrfp")
+        listener = ImageListener()
+        time.sleep(3)
+        RT_camera, obj_pc_first_view = listener.get_data_to_save()
+        RT_current = np.eye(4, 4)
+        RT_current[0, 3] += 0.6
 
     ############## Sample Run of Grasp Opt ##############
-    RT_gopt = optimize_grasp(
-        obj_pc=obj_pc_first_view,
-        RT_camera=RT_camera,
-        RT_current=RT_current,
-        device=device,
-    )
+
+    try:
+        RT_gopt = optimize_grasp(
+            obj_pc=obj_pc_first_view,
+            RT_camera=RT_camera,
+            RT_current=RT_current,
+            device=device,
+        )
+    except ValueError:
+        print(f"No solution to the optimization found")
 
     print("Done....")
