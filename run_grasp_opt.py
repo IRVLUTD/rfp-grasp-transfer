@@ -30,6 +30,7 @@ from utils.fig_utils import (
 )
 
 from utils import test_data_utils
+from listener import ImageListener
 
 
 def get_q(RT, target_model):
@@ -232,6 +233,12 @@ def make_parser():
         default="task_18_10s-move-chair",
     )
     parser.add_argument(
+        "--ros",
+        type=str,
+        help="Task Name to run the test on",
+        default="n",
+    )
+    parser.add_argument(
         "--frame_id",
         type=int,
         help="Frame ID of the grasp to perturb/distrub and test the optimization on",
@@ -241,6 +248,10 @@ def make_parser():
 
 
 if __name__ == "__main__":
+    import sys
+    import time
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
 
     ########## testing code ###########
     parser = make_parser()
@@ -248,31 +259,37 @@ if __name__ == "__main__":
     tasks_dir = args.dataset_dir
     task_id = args.task_id
     frame_id = args.frame_id
-    # Considering the "Task 18 Move Chair" and Frame 31 from it by default
-    frame_id_str = f"{frame_id:06d}"  # = "000031"
-    print("Demo Data dir:", tasks_dir)
-    print("Task id:", task_id)
-    print("Frame id:", frame_id_str)
+    if args.ros == "n":
+        # Considering the "Task 18 Move Chair" and Frame 31 from it by default
+        frame_id_str = f"{frame_id:06d}"  # = "000031"
+        print("Demo Data dir:", tasks_dir)
+        print("Task id:", task_id)
+        print("Frame id:", frame_id_str)
 
-    target_gripper = "fetch_gripper"
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+        target_gripper = "fetch_gripper"
 
-    input_dir = osp.join(tasks_dir, task_id)
-    logged_data = test_data_utils.get_npz_data(
-        tasks_dir=tasks_dir, task_id=task_id, frame_id=frame_id_str
-    )
-    npz_data = logged_data["npz_data"]
-    obj_pc_first_view = logged_data["obj_pc_first_view"]
-    RT_camera = logged_data["RT_camera"]
-    RT_old = logged_data["RT_old"]
+        input_dir = osp.join(tasks_dir, task_id)
+        logged_data = test_data_utils.get_npz_data(
+            tasks_dir=tasks_dir, task_id=task_id, frame_id=frame_id_str
+        )
+        npz_data = logged_data["npz_data"]
+        obj_pc_first_view = logged_data["obj_pc_first_view"]
+        RT_camera = logged_data["RT_camera"]
+        RT_old = logged_data["RT_old"]
+        import pdb
 
-    # NOTE: Perturb the given gripper pose
-    # RT_current here reflect what we might see in real world,
-    # i.e a potentially bad grasp pose
-    # We obtain it by translating in +x by some distance 0.05m (reverse of standoff)
-    RT_current = test_data_utils.translate_grasp_along_palm_normal(RT_old, delta=0.05)
-    ################## End Loading of Dummy Data ###############
+        pdb.set_trace()
+        # NOTE: Perturb the given gripper pose
+        # RT_current here reflect what we might see in real world,
+        # i.e a potentially bad grasp pose
+        # We obtain it by translating in +x by some distance 0.05m (reverse of standoff)
+        RT_current = test_data_utils.translate_grasp_along_palm_normal(
+            RT_old, delta=0.05
+        )
+        ################## End Loading of Dummy Data ###############
 
+        # NOTE: Load any real world data here if needed
+        # NOTE: Can also add saving the RT_opt_grasp here if needed
     else:
         import rospy
 
