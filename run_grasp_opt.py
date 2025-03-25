@@ -137,6 +137,8 @@ def optimize_grasp(
             gripper_surf_pts_for_cmap, objpc_pts, SHARP_FACTOR
         )
 
+    # removed viz
+
     # ############# VIZ: Local Obj PC region and Gripper Pts + Contact Map #############
     vis_data = []
     vis_data += [plot_point_cloud_cmap(objpc_pts, color_levels=contact_map, size=3)]
@@ -147,9 +149,11 @@ def optimize_grasp(
             opacity=0.8,
         )
     ]
+
+    
     fig = go.Figure(data=vis_data)
     fig.show()
-    # #############################################################################
+    #############################################################################
 
     ######### Grasp Opt Init #########
 
@@ -291,24 +295,34 @@ if __name__ == "__main__":
         # NOTE: Load any real world data here if needed
         # NOTE: Can also add saving the RT_opt_grasp here if needed
     else:
-        import rospy
+        # import rospy
 
-        rospy.init_node("testrfp")
-        listener = ImageListener()
-        time.sleep(3)
-        RT_camera, obj_pc_first_view = listener.get_data_to_save()
-        RT_current = np.eye(4, 4)
-        RT_current[0, 3] += 0.6
+        # rospy.init_node("testrfp")
+        # listener = ImageListener()
+        # time.sleep(3)
+        # RT_camera, obj_pc_first_view = listener.get_data_to_save()
+        # RT_current = np.eye(4, 4)
+        # RT_current[0, 3] += 0.6
+        pass
 
     ############## Sample Run of Grasp Opt ##############
 
     try:
+        #1. pointclod, grasp from npz file
+        #2. save grasp in another npz file
+        data = np.load("/tmp/opt_data.npz")
+        obj_pc_first_view = data["object_pc"]
+        RT_current = data["RT_grasp"]
+        RT_camera = data["RT_camera"]
+        
         RT_gopt = optimize_grasp(
             obj_pc=obj_pc_first_view,
             RT_camera=RT_camera,
             RT_current=RT_current,
             device=device,
         )
+
+        np.savez("/tmp/opt_grasp.npz",opt_RT_grasp=RT_gopt)
     except ValueError:
         print(f"No solution to the optimization found")
 
