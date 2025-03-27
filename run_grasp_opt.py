@@ -350,9 +350,9 @@ if __name__ == "__main__":
     try:
         # 1. pointclod, grasp from npz file
         # 2. save grasp in another npz file
-        input_fname = "/tmp/opt_data.npz"
-        # in_fname = "/home/ninad/Datasets/MMDemo/grasp_opt_trial_march17-selected/hammer-corrected/opt_data.npz"
-        # in_fname = "/home/ninad/Datasets/MMDemo/grasp_opt_trial_march17-selected/utd-bottle-shelf-corrected/opt_data.npz"
+        # input_fname = "/tmp/opt_data.npz"
+        # input_fname = "/home/ninad/Datasets/MMDemo/grasp_opt_trial_march17-selected/hammer-corrected/opt_data.npz"
+        input_fname = "/home/ninad/Datasets/MMDemo/grasp_opt_trial_march17-selected/utd-bottle-shelf-corrected/opt_data.npz"
         data = np.load(input_fname)
         obj_pc_first_view = data["object_pc"]
         RT_current = data["RT_grasp"]
