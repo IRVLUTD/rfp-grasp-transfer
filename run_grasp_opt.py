@@ -30,7 +30,8 @@ from utils.fig_utils import (
 )
 
 from utils import test_data_utils
-from listener import ImageListener
+
+# from listener import ImageListener
 
 
 def get_q(RT, target_model):
@@ -71,6 +72,7 @@ def optimize_grasp(
     weight_contact: float = 0.2,
     optimize_only_translation: bool = False,
     num_opt_iters: int = 100,
+    num_parallel_opt: int = 4,
 ) -> np.array:
 
     # Collect params and flags
@@ -117,11 +119,12 @@ def optimize_grasp(
 
     ## The standoff for the "colliding" grasp will the Source Grasp in GraspOpt
     RT_standoff = test_data_utils.translate_grasp_along_palm_normal(
-        RT_current, delta=-0.05
+        RT_current, delta=-0.1
     )
     q_standoff_grasp = get_q(RT_standoff, target_model)
     q_current_grasp = get_q(RT_current, target_model)
-    source_q = q_standoff_grasp
+    source_q = q_current_grasp  # NOTE: using the bad grasp as initial grasp
+    # source_q = q_standoff_grasp
 
     # NOTE: Use gripper surface points for the contact map goal
     gripper_surf_pts_for_cmap = (
@@ -140,28 +143,38 @@ def optimize_grasp(
     # removed viz
 
     # ############# VIZ: Local Obj PC region and Gripper Pts + Contact Map #############
-    vis_data = []
-    vis_data += [plot_point_cloud_cmap(objpc_pts, color_levels=contact_map, size=3)]
-    vis_data += [
-        plot_trimesh_mesh(
-            fetch_gripper_mesh.copy().apply_transform(RT_current),
-            color="gray",
-            opacity=0.8,
-        )
-    ]
+    # vis_data = []
+    # vis_data += [plot_point_cloud_cmap(objpc_pts, color_levels=contact_map, size=3)]
+    # vis_data += [
+    #     plot_trimesh_mesh(
+    #         fetch_gripper_mesh.copy().apply_transform(RT_current),
+    #         color="gray",
+    #         opacity=0.8,
+    #     )
+    # ]
 
-    
-    fig = go.Figure(data=vis_data)
-    fig.show()
+    # fig = go.Figure(data=vis_data)
+    # fig.show()
     #############################################################################
 
     ######### Grasp Opt Init #########
 
     # # Construct the contact map goal:
     # # Goal = [obj pc points (N,3), obj pc normals (N,3), contact map (N, 1)], Shape = (N, 7)
+
+    # Augmented Obj Pt Cloud
+    # NOTE: Initialize a thin shell around the object point cloud for collision
+    # consideration
+    # NOTE: 0.005 i.e 5mm used since using larger values effectively means that
+    # we are scaling up the object --> could create issues in the optimization
+    augmented_obj_pts = objpc_pts + 0.005 * objpc_nrm
     cmap_goal = np.concatenate(
-        [objpc_pts, objpc_nrm, contact_map.reshape(-1, 1)], axis=1
+        [augmented_obj_pts, objpc_nrm, contact_map.reshape(-1, 1)], axis=1
     )
+
+    # cmap_goal = np.concatenate(
+    #     [objpc_pts, objpc_nrm, contact_map.reshape(-1, 1)], axis=1
+    # )
     cmap_tensor = torch.tensor(cmap_goal)
 
     grasp_transfer_opt = AdamGraspCmap(
@@ -171,7 +184,8 @@ def optimize_grasp(
         opt_only_trans=OPT_ONLY_TRANS,
         sharp_factor=SHARP_FACTOR,
         source_grasp=source_q,
-        learning_rate=8e-4,
+        num_particles=num_parallel_opt,
+        learning_rate=1e-3,
         max_iter=NUM_ITERS,
         device=device,
         energy_func_name=ENERGY_FUNC,
@@ -199,20 +213,46 @@ def optimize_grasp(
     ############### GrasOpt Result Viz ################
     # VIZ: Local Obj PC region and Gripper Pts + Contact Map
     vis_data = []
-    vis_data += [plot_point_cloud_cmap(objpc_pts, color_levels=contact_map, size=6)]
-    # vis_data += [plot_point_cloud(gripper_pts, color="black", size=3, opacity=1)]
+    vis_data += [plot_point_cloud_cmap(objpc_pts, color_levels=contact_map, size=4)]
+
+    # vis_data += [plot_point_cloud(augmented_obj_pts, color="blue", opacity=0.3)]
+
+    # hand_mesh_pts = (
+    #     target_model.get_fullmesh_points(q=best_q.unsqueeze(0))
+    #     .squeeze(0)
+    #     .detach()
+    #     .cpu()
+    #     .numpy()
+    # )
+    # hand_surf_pts = (
+    #     target_model.get_surface_points(q=best_q.unsqueeze(0))
+    #     .squeeze(0)
+    #     .detach()
+    #     .cpu()
+    #     .numpy()
+    # )
+    # vis_data += [plot_point_cloud(hand_mesh_pts, color="black", size=2)]
+    # vis_data += [plot_point_cloud(hand_surf_pts, color="red", size=2)]
+
     vis_data += [
         plot_trimesh_mesh(
             fetch_gripper_mesh.copy().apply_transform(RT_current),
             color="red",
-            opacity=0.6,
+            opacity=0.3,
         )
     ]
+    # vis_data += [
+    #     plot_trimesh_mesh(
+    #         fetch_gripper_mesh.copy().apply_transform(RT_standoff),
+    #         color="lightblue",
+    #         opacity=0.6,
+    #     )
+    # ]
     vis_data += [
         plot_trimesh_mesh(
             fetch_gripper_mesh.copy().apply_transform(RT_optimized_grasp),
             color="lightgreen",
-            opacity=0.6,
+            opacity=0.3,
         )
     ]
     fig = go.Figure(data=vis_data)
@@ -308,21 +348,28 @@ if __name__ == "__main__":
     ############## Sample Run of Grasp Opt ##############
 
     try:
-        #1. pointclod, grasp from npz file
-        #2. save grasp in another npz file
-        data = np.load("/tmp/opt_data.npz")
+        # 1. pointclod, grasp from npz file
+        # 2. save grasp in another npz file
+        # input_fname = "/tmp/opt_data.npz"
+        # input_fname = "/home/ninad/Datasets/MMDemo/grasp_opt_trial_march17-selected/hammer-corrected/opt_data.npz"
+        input_fname = "/home/ninad/Datasets/MMDemo/grasp_opt_trial_march17-selected/utd-bottle-shelf-corrected/opt_data.npz"
+        data = np.load(input_fname)
         obj_pc_first_view = data["object_pc"]
         RT_current = data["RT_grasp"]
         RT_camera = data["RT_camera"]
-        
+
         RT_gopt = optimize_grasp(
             obj_pc=obj_pc_first_view,
             RT_camera=RT_camera,
             RT_current=RT_current,
             device=device,
+            sharp_factor=20,
+            weight_collision=1,
+            num_opt_iters=100,
+            num_parallel_opt=8,
         )
 
-        np.savez("/tmp/opt_grasp.npz",opt_RT_grasp=RT_gopt)
+        np.savez("/tmp/opt_grasp.npz", opt_RT_grasp=RT_gopt)
     except ValueError:
         print(f"No solution to the optimization found")
 
