@@ -66,7 +66,7 @@ def optimize_grasp(
     device: str,
     target_gripper: str = "fetch_gripper",
     threshold_dist_local: float = 0.1,
-    energy_func: str = "align_dist",
+    energy_func: str = "euclidean_dist",
     sharp_factor: float = 10,
     weight_collision: float = 1,
     weight_contact: float = 0.2,
@@ -74,6 +74,28 @@ def optimize_grasp(
     num_opt_iters: int = 100,
     num_parallel_opt: int = 4,
 ) -> np.array:
+    """
+    Function to refine grasp using grasp optimization. Needs the object point
+    cloud (in camera frame), camera pose (for estimating surface normals), and
+    the current grasp pose.
+
+    Arguments
+    ---------
+    Only listing non-obvious params here right now...
+
+    threshold_dist_local (float)
+        Only consider object points which are closer to the gripper point cloud
+        under this value. Used to focus on a local region of an object
+    energy_func (str)
+        Prefer `euclidean_dist` for partial point cloud with unreliable normal
+        information. With watertight meshes, prefer `align_dist` where we know
+        the normals
+
+    Returns
+    -------
+    A dictionary with data from the optimization (energy, q trajectory,
+    optimized gripper pose). Useful for debugging the optimization.
+    """
 
     # Collect params and flags
     THRESHOLD_DIST_LOCAL = threshold_dist_local
@@ -142,7 +164,25 @@ def optimize_grasp(
 
     # removed viz
 
-    # ############# VIZ: Local Obj PC region and Gripper Pts + Contact Map #############
+    # normal_lines_viz = []
+    # scale = 0.01  # Normal length scaling factor
+    # for i in range(objpc_nrm.shape[0]):
+    #     x, y, z = objpc_pts[i]
+    #     u, v, w = objpc_nrm[i]
+    #     normal_lines_viz.extend(
+    #         [
+    #             go.Scatter3d(
+    #                 x=[x, x + scale * u],
+    #                 y=[y, y + scale * v],
+    #                 z=[z, z + scale * w],
+    #                 mode="lines",
+    #                 line=dict(color="purple", width=2),
+    #                 name=f"Normal {i}",
+    #             )
+    #         ]
+    #     )
+
+    ############# VIZ: Local Obj PC region and Gripper Pts + Contact Map #############
     # vis_data = []
     # vis_data += [plot_point_cloud_cmap(objpc_pts, color_levels=contact_map, size=3)]
     # vis_data += [
@@ -152,6 +192,7 @@ def optimize_grasp(
     #         opacity=0.8,
     #     )
     # ]
+    # # vis_data += normal_lines_viz
 
     # fig = go.Figure(data=vis_data)
     # fig.show()
@@ -191,11 +232,17 @@ def optimize_grasp(
         energy_func_name=ENERGY_FUNC,
     )
 
-    q_traj, energy, _ = grasp_transfer_opt.run_adam(
+    q_traj, energy_traj, econ_traj, epen_traj, _ = grasp_transfer_opt.run_adam(
         contact_map_goal=cmap_tensor, source_grasp=source_q, running_name="test"
     )
-    min_energy_index = energy.min(dim=0)[1]
-    best_q = q_traj[min_energy_index.item(), -1]
+
+    energy_traj = np.asarray(energy_traj).T  # shape (num_parallel, num_iters)
+    econ_traj = np.asarray(econ_traj).T  # shape (num_parallel, num_iters)
+    epen_traj = np.asarray(epen_traj).T
+
+    min_energy_index = energy_traj[:, -1].argmin()
+    # min_energy_index = energy.min(dim=0)[1].item()
+    best_q = q_traj[min_energy_index, -1]
     if best_q.shape[0] != 9 + len(target_model.dynamic_joints):
         # We optimized only for pose, so need to provide dummy joints
         best_q = torch.cat(
@@ -238,7 +285,7 @@ def optimize_grasp(
         plot_trimesh_mesh(
             fetch_gripper_mesh.copy().apply_transform(RT_current),
             color="red",
-            opacity=0.3,
+            opacity=0.4,
         )
     ]
     # vis_data += [
@@ -252,12 +299,24 @@ def optimize_grasp(
         plot_trimesh_mesh(
             fetch_gripper_mesh.copy().apply_transform(RT_optimized_grasp),
             color="lightgreen",
-            opacity=0.3,
+            opacity=0.4,
         )
     ]
     fig = go.Figure(data=vis_data)
     fig.show()
-    return RT_optimized_grasp
+
+    return_data = {
+        "q_traj": q_traj.detach().cpu().numpy(),
+        "energy_all": energy_traj,
+        "energy_con": econ_traj,
+        "energy_pen": epen_traj,
+        "cmap_goal": cmap_goal,
+        "opt_RT_grasp": RT_optimized_grasp,
+        "RT_standoff": RT_standoff,
+        "RT_current": RT_current,
+    }
+
+    return return_data
 
 
 def make_parser():
@@ -280,7 +339,7 @@ def make_parser():
         "--ros",
         type=str,
         help="Task Name to run the test on",
-        default="n",
+        default="y",
     )
     parser.add_argument(
         "--frame_id",
@@ -350,26 +409,30 @@ if __name__ == "__main__":
     try:
         # 1. pointclod, grasp from npz file
         # 2. save grasp in another npz file
-        # input_fname = "/tmp/opt_data.npz"
+        input_fname = "/tmp/opt_data.npz"
         # input_fname = "/home/ninad/Datasets/MMDemo/grasp_opt_trial_march17-selected/hammer-corrected/opt_data.npz"
-        input_fname = "/home/ninad/Datasets/MMDemo/grasp_opt_trial_march17-selected/utd-bottle-shelf-corrected/opt_data.npz"
+        # input_fname = "/home/ninad/Datasets/MMDemo/grasp_opt_trial_march17-selected/utd-bottle-shelf-corrected/opt_data.npz"
+        # input_fname = "/home/ninad/Datasets/MMDemo/newtest/opt_data.npz"
         data = np.load(input_fname)
         obj_pc_first_view = data["object_pc"]
         RT_current = data["RT_grasp"]
         RT_camera = data["RT_camera"]
 
-        RT_gopt = optimize_grasp(
+        opt_data = optimize_grasp(
             obj_pc=obj_pc_first_view,
             RT_camera=RT_camera,
             RT_current=RT_current,
             device=device,
+            energy_func="euclidean_dist",
             sharp_factor=20,
             weight_collision=1,
+            weight_contact=0.5,
             num_opt_iters=100,
-            num_parallel_opt=8,
+            num_parallel_opt=4,
         )
-
-        np.savez("/tmp/opt_grasp.npz", opt_RT_grasp=RT_gopt)
+        # np.savez("/tmp/opt_grasp.npz", opt_RT_grasp=RT_gopt)
+        ### Saved npz still has the optimized grasp with the key "opt_RT_grasp"
+        np.savez("/tmp/opt_grasp.npz", **opt_data)
     except ValueError:
         print(f"No solution to the optimization found")
 
