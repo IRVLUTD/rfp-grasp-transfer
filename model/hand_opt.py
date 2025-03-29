@@ -411,6 +411,8 @@ class HandObjectGraspOpt:
                 running_name=running_name,
                 energy_func_name=energy_func_name,
             )
+        self.collision_energy = None
+        self.contact_energy = None
 
     def reset(
         self,
@@ -691,6 +693,8 @@ class HandObjectGraspOpt:
             energy += z_energy
 
         self.energy = energy
+        self.collision_energy = energy_penetration
+        self.contact_energy = energy_contact
         return energy
 
     def step(self):
@@ -891,6 +895,9 @@ class AdamGraspCmap:
     def run_adam(self, contact_map_goal, source_grasp, running_name):
 
         q_trajectory = []
+        energy_trajectory = []
+        e_pen_traj = []
+        e_con_traj = []
 
         self.opt_model.reset(
             contact_map_goal, source_grasp, running_name, self.energy_func_name
@@ -917,6 +924,14 @@ class AdamGraspCmap:
 
             with torch.no_grad():
                 energy = self.opt_model.energy.detach().cpu().tolist()
+                energy_trajectory.append(energy)
+
+                e_con_traj.append(self.opt_model.contact_energy.detach().cpu().tolist())
+
+                e_pen_traj.append(
+                    self.opt_model.collision_energy.detach().cpu().tolist()
+                )
+
                 tag_scaler_dict = {
                     f"{i_energy}": energy[i_energy] for i_energy in range(len(energy))
                 }
@@ -932,9 +947,13 @@ class AdamGraspCmap:
                         global_step=i_iter,
                     )
         q_trajectory = torch.stack(q_trajectory, dim=0).transpose(0, 1)
+        # energy_trajectory = torch.stack(energy_trajectory, dim=0).transpose(0, 1)
         return (
             q_trajectory,
-            self.opt_model.energy.detach().clone().cpu(),
+            # self.opt_model.energy.detach().clone().cpu(),
+            energy_trajectory,
+            e_con_traj,
+            e_pen_traj,
             self.steps_per_iter,
         )
 
