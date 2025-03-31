@@ -1,5 +1,11 @@
 # Grasp Transfer via RFP
 
+## Running in realworld
+```
+conda activate mfg2 && cd ~/Projects/sai/trajectory-tracking-optimization/mm_ws_12/scripts
+python run_grasp_opt.py --dataset_dir ~/Downloads/17tasks/newCamK --ros y --task_id <task folder name> --frame_id <gripper close frame>
+sample args: task_id  task_18_10s-move-chair,  frame_id 31. The frame id info can be found in ~/Projects/sai/trajectory-tracking-optimization/mm_ws_12/scripts/config/gripper_open_close_info.json
+```
 ## Setup
 
 **Installation:**
