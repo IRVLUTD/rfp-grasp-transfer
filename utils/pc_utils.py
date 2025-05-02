@@ -205,3 +205,44 @@ def backproject_camera(im_depth, K, target_mask=None, threshold=5):
     R = Kinv.dot(x2d.transpose())
     X = np.multiply(np.tile(depth.reshape(1, width * height), (3, 1)), R)
     return X[:, mask].T
+
+
+def get_obb_points_normals(objpc_pts):
+    # Convert to Open3D point cloud
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(objpc_pts)
+    obb = pcd.get_oriented_bounding_box()
+    # 2. Create a box mesh at origin
+    unit_box = o3d.geometry.TriangleMesh.create_box(width=1.0, height=1.0, depth=1.0)
+    unit_box.compute_vertex_normals()
+
+    # 3. Transform box to match OBB
+    # Center the unit box at origin
+    unit_box.translate(-unit_box.get_center())
+
+    # Scale to match OBB extents
+    unit_box.scale(1.0, center=(0, 0, 0))  # ensure centered scaling
+    unit_box.vertices = o3d.utility.Vector3dVector(
+        np.asarray(unit_box.vertices) * obb.extent
+    )
+
+    # Rotate and translate to match OBB
+    unit_box.rotate(obb.R, center=(0, 0, 0))
+    unit_box.translate(obb.center)
+
+    # 4. Sample points with normals on box surface
+    pcd = unit_box.sample_points_uniformly(number_of_points=256)
+    pcd.estimate_normals()  # optionally, but normals will be noisy
+
+    # 5. Extract points and normals as NumPy arrays
+    points = np.asarray(pcd.points)
+    normals = np.asarray(pcd.normals)
+    return points, normals
+
+
+def filter_pts_lower_z(points_base, percent=5):
+    z = points_base[:, 2]
+    threshold = np.percentile(z, percent)
+    print(threshold)
+    mask = z > threshold
+    return points_base[mask]
