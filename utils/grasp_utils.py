@@ -560,3 +560,16 @@ def get_urdf_path(gripper_name):
     else:
         print("[ERROR]: INVALID Gripper name. Returning empty string!!!")
         return ""
+
+
+def get_mgg_aligned_RT_grasp(
+    source_gripper: str, target_gripper: str, RT_source_grasp: np.ndarray
+):
+    source_grasp_7d = convert_4x4_to_7dpose(RT_source_grasp)
+    aligned_grasp_7d = convert_gripper_to_aligned_pose(source_grasp_7d, source_gripper)
+    target_grasp_7d = convert_aligned_to_gripper_pose(aligned_grasp_7d, target_gripper)
+    RT_target_grasp = convert_7dpose_to_4x4(target_grasp_7d)
+    return RT_target_grasp
+
+
+def convert_4x4_to_9D

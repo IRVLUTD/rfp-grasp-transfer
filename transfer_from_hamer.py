@@ -13,7 +13,11 @@ import plotly.graph_objects as go
 
 from mano_pybullet.hand_model import HandModel20
 
-from utils.grasp_utils import get_handmodel, rotation_matrix_from_vectors
+from utils.grasp_utils import (
+    get_handmodel,
+    rotation_matrix_from_vectors,
+    get_mgg_aligned_RT_grasp,
+)
 from utils.rot6d_utils import mat2rvec, robust_compute_rotation_matrix_from_ortho6d
 from model.hand_opt import AdamGraspTransfer
 from model.hand_model import GcsHandModel
@@ -23,6 +27,31 @@ from collections import namedtuple
 
 
 LeftRightTuple = namedtuple("LeftRightTuple", ["left", "right"])
+
+
+def get_q(RT, target_model):
+    """
+    Constructs a grasp q tensor (9-D) for an equivalent 4x4 RT pose
+    """
+    tra = RT[:3, 3]
+    rot = RT[:3, :3]
+    q = torch.zeros(9)
+    q[:3] = torch.tensor(tra)
+    q[3:] = torch.tensor(rot.T.reshape(-1)[:6])
+    q = q.to(target_model.device)
+    if q.shape[0] != 9 + len(target_model.dynamic_joints):
+        # We optimized only for pose, so need to provide dummy joints
+        q = torch.cat(
+            (
+                q,
+                (
+                    target_model.dynamic_joints_q_upper[0]
+                    - target_model.dynamic_joints_q_mid[0]
+                ),
+            ),
+            dim=0,
+        )
+    return q
 
 
 def process_hamer_output(npz_data) -> Dict:
@@ -158,7 +187,7 @@ def transfer_grasp_handler(
     return np.array(result), plots, meshes
 
 
-def transfer_grasp(
+def transfer_grasp_old(
     source_data: Dict,
     source_model: GcsHandModel,
     manopyb_model: HandModel20,
@@ -278,6 +307,100 @@ def transfer_grasp(
     target_mesh = trimesh.util.concatenate(target_grp_trimesh)
 
     return target_RT, vis_data, target_mesh
+
+
+def transfer_grasp(
+    source_data: Dict,
+    source_model: GcsHandModel,
+    manopyb_model: HandModel20,
+    target_model: GcsHandModel,
+    is_left: bool,
+):
+    # Using MGG aligned grasp transfer
+    hand_rot_mat = source_data["hand_rot_mat"]
+    hand_theta_mat = source_data["hand_thetas"]
+    trans = source_data["translation"]
+
+    source_gripper = "mano_left" if is_left else "mano_right"
+    target_gripper = "fetch_gripper"
+
+    if is_left:
+        hand_rot_mat[1::3] *= -1
+        hand_rot_mat[2::3] *= -1
+        hand_theta_mat[1::3] *= -1
+        hand_theta_mat[1::3] *= -1
+
+    hand_theta_full = np.array(
+        [mat2rvec(hand_rot_mat)]
+        + [mat2rvec(hand_theta_mat[i]) for i in range(hand_theta_mat.shape[0])]
+    )
+
+    angles, palm_basis = manopyb_model.mano_to_angles(hand_theta_full)
+    pyb_model_origin = manopyb_model.origins()[0]
+    palm_trans = trans + pyb_model_origin - palm_basis @ pyb_model_origin
+
+    actual_trans = np.array(palm_trans)
+    actual_basis = np.array(palm_basis)
+    if is_left:
+        # actual_trans -= trans
+        # actual_trans[0] *= -1
+        # actual_trans += trans
+        # r_palm_normal = palm_basis @ np.array([0, -1, 0])
+        # r_palm_normal_flip = np.array(r_palm_normal)
+        # r_palm_normal_flip[0] *= -1
+        # rotmat_flip = rotation_matrix_from_vectors(r_palm_normal, r_palm_normal_flip)
+        # actual_basis = rotmat_flip @ palm_basis
+        R_x = np.array([[1, 0, 0], [0, -1, 0], [0, 0, -1]])
+        actual_basis = np.dot(actual_basis, R_x)
+
+    RT_src_grasp = np.eye(4)
+    RT_src_grasp[:3, 3] = actual_trans.copy()
+    RT_src_grasp[:3, :3] = actual_basis.copy()
+
+    RT_target_grasp = get_mgg_aligned_RT_grasp(
+        source_gripper=source_gripper,
+        target_gripper=target_gripper,
+        RT_source_grasp=RT_src_grasp,
+    )
+
+    ############## For VIZ #################
+    grasp_pose = torch.zeros(9)
+    # Rotation in 6D representation looks like: (x1,x2,x3, y1,y2,y3) (1st 2 columns from the rot mat)
+    grasp_pose[3:] = torch.tensor(actual_basis.T.reshape(-1)[:6])
+    grasp_pose[:3] = torch.tensor(actual_trans)
+    # grasp_dofs = torch.tensor(angles)
+    grasp_dofs = -1 * torch.tensor(angles) if is_left else torch.tensor(angles)
+    source_grasp_q = (
+        torch.cat(
+            [
+                grasp_pose,
+                grasp_dofs,
+            ]
+        )
+        .unsqueeze(0)
+        .to(source_model.device)
+        .float()
+    )
+    target_grasp_q = get_q(RT_target_grasp)
+
+    # Plotly viz figure
+    vis_data = source_model.get_plotly_data(q=source_grasp_q, color="red", opacity=0.3)
+    target_gripper_mesh_data = target_model.get_plotly_data(
+        q=target_grasp_q.unsqueeze(0).float().to(target_model.device),
+        color="green",
+        opacity=0.3,
+    )
+    vis_data += target_gripper_mesh_data
+
+    # Target gripper mesh
+    target_grp_trimesh = []
+    for mesh in target_gripper_mesh_data:
+        vertices = np.array([mesh.x, mesh.y, mesh.z]).T
+        faces = np.array([mesh.i, mesh.j, mesh.k]).T
+        target_grp_trimesh.append(trimesh.Trimesh(vertices=vertices, faces=faces))
+    target_mesh = trimesh.util.concatenate(target_grp_trimesh)
+
+    return RT_target_grasp, vis_data, target_mesh
 
 
 def main(args):
