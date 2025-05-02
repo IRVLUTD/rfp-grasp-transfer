@@ -14,7 +14,10 @@ from utils.grasp_utils import (
     convert_gripper_to_aligned_pose,
 )
 
-from utils.rot6d_utils import robust_compute_rotation_matrix_from_ortho6d
+from utils.rot6d_utils import (
+    robust_compute_rotation_matrix_from_ortho6d,
+    get_rot6d_from_rotmat,
+)
 
 
 class GcsGraspTransferOpt:
@@ -322,7 +325,7 @@ class HandObjectGraspOpt:
         contact_weight=1,
         opt_only_trans=True,
         sharp_factor=20,
-        threshold_dist=0.005,
+        threshold_dist=0.015,
     ):
         """
         source_robot_name: str
@@ -467,8 +470,27 @@ class HandObjectGraspOpt:
             self.source_grasp[3:9].detach().clone().repeat(self.num_particles, 1)
         )
 
+        # source_grasp_rotmat = robust_compute_rotation_matrix_from_ortho6d(
+        #     source_grasp[3:].detach().cpu().unsqueeze(0)
+        # )[0].numpy()
+        # source_grasp_tf = np.eye(4)
+        # source_grasp_tf[:3, :3] = source_grasp_rotmat
+        # source_grasp_tf[:3, 3] = source_grasp[:3].detach().cpu().numpy()
+
+        # # fetch_hand_normal_dir = 0  # 0 is +x, 1 is +y, 2 is +z
+        # fetch_hand_normal = np.array([1, 0, 0])
+        # num_rotations = self.num_particles
+        # angles = np.linspace(0, np.pi / 2, num_rotations, endpoint=False)
+        # rotations = R.from_rotvec(
+        #     angles[:, np.newaxis] * fetch_hand_normal
+        # )  # axis angle representation
+
+        # for i, _rot in enumerate(rotations):
+        #     _rotmat = source_grasp_rotmat @ _rot.as_matrix()
+        #     q_pose[i, 3:] = torch.tensor(get_rot6d_from_rotmat(_rotmat)).to(self.device)
+
         # randomly perturb the translation
-        perturbation_scale = 5e-3
+        perturbation_scale = 2e-3
         noise = torch.randn_like(q_pose[:, :3]) * perturbation_scale
         q_pose[:, :3] += noise
 
@@ -497,10 +519,11 @@ class HandObjectGraspOpt:
         self.q_current.requires_grad = True
         self.optimizer = torch.optim.Adam([self.q_current], lr=self.learning_rate)
 
-    def compute_energy_euclidean_dist(self):
+    def basic_compute_energy_euclidean_dist(self):
         # hand_mesh_points = self.target_handmodel.get_fullmesh_points()
         hand_mesh_points_ = self.target_handmodel.get_fullmesh_points().clone()
-        hand_surface_points = self.target_handmodel.get_surface_points()
+        # hand_surface_points = self.target_handmodel.get_surface_points()
+        hand_surface_points = self.target_handmodel.get_surface_points_palm()
         hand_surface_points_ = hand_surface_points.detach().clone()
 
         npts_object = self.object_point_cloud.size()[0]
@@ -517,20 +540,34 @@ class HandObjectGraspOpt:
         hand_surface_points = hand_surface_points.reshape(
             self.num_particles, 1, npts_hand_surf, 3
         )
+        # batch_object_point_cloud = batch_object_point_cloud.repeat(
+        #     1, npts_hand_surf, 1, 1
+        # ).transpose(1, 2)
+        # hand_surface_points = hand_surface_points.repeat(1, npts_object, 1, 1)
+
+        # object_hand_dist = (hand_surface_points - batch_object_point_cloud).norm(dim=3)
+
+        # contact_dist = object_hand_dist.min(dim=2)[0]
+        # contact_value_current = 1 - 2 * (
+        #     torch.sigmoid(self.sharp_factor * contact_dist) - 0.5
+        # )
+        # energy_contact = torch.abs(
+        #     contact_value_current - self.contact_value_goal.reshape(1, -1)
+        # ).mean(dim=1)
+
         batch_object_point_cloud = batch_object_point_cloud.repeat(
             1, npts_hand_surf, 1, 1
-        ).transpose(1, 2)
-        hand_surface_points = hand_surface_points.repeat(1, npts_object, 1, 1)
-
-        object_hand_dist = (hand_surface_points - batch_object_point_cloud).norm(dim=3)
-
-        contact_dist = object_hand_dist.min(dim=2)[0]
-        contact_value_current = 1 - 2 * (
-            torch.sigmoid(self.sharp_factor * contact_dist) - 0.5
         )
-        energy_contact = torch.abs(
-            contact_value_current - self.contact_value_goal.reshape(1, -1)
-        ).mean(dim=1)
+        hand_surface_points = hand_surface_points.repeat(
+            1, npts_object, 1, 1
+        ).transpose(1, 2)
+
+        handsurf_object_dist = (hand_surface_points - batch_object_point_cloud).norm(
+            dim=3
+        )
+        handsurf_object_dist, _ = handsurf_object_dist.min(dim=2)
+        contact_dists = F.relu(handsurf_object_dist - self.threshold_dist)
+        energy_contact = contact_dists.mean(dim=1)
 
         ############## Compute Collision Cost #################
 
@@ -543,8 +580,8 @@ class HandObjectGraspOpt:
         hand_mesh_points = hand_mesh_points_.reshape(
             self.num_particles, 1, npts_hand_mesh, 3
         )
-
-        combined_hand_pts = torch.cat((hand_surface_points_, hand_mesh_points_), dim=1)
+        hand_surface_points__ = self.target_handmodel.get_surface_points()
+        combined_hand_pts = torch.cat((hand_surface_points__, hand_mesh_points_), dim=1)
         npts_hand_mesh = combined_hand_pts.shape[1]
         hand_mesh_points = combined_hand_pts.reshape(self.num_particles, 1, -1, 3)
 
@@ -571,8 +608,120 @@ class HandObjectGraspOpt:
 
         # Basically penalize any gripper point that is too close (below a threshold)
         hand_object_dist, _ = hand_object_dist.min(dim=2)
-        in_out_dists = F.relu(self.threshold_dist - hand_object_dist)
+        in_out_dists = F.relu(self.threshold_dist + 5e-3 - hand_object_dist)
+        # in_out_dists = torch.exp(in_out_dists)
         energy_penetration = in_out_dists.mean(dim=1)
+
+        ############# Compute Total Energy #####################
+        energy = (
+            self.contact_weight * energy_contact
+            + self.collision_weight * energy_penetration
+        )
+
+        if not self.opt_only_pose:
+            # TODO: add a normalized energy?
+            z_norm = F.relu(self.q_current[:, 9:] - self.q_joint_upper) + F.relu(
+                self.q_joint_lower - self.q_current[:, 9:]
+            )
+            z_energy = z_norm.sum(dim=1)
+            energy += z_energy
+
+        self.energy = energy
+        self.collision_energy = energy_penetration
+        self.contact_energy = energy_contact
+        return energy
+
+    def compute_energy_euclidean_dist(self):
+        # hand_mesh_points = self.target_handmodel.get_fullmesh_points()
+        hand_mesh_points_ = self.target_handmodel.get_fullmesh_points().clone()
+        # hand_surface_points = self.target_handmodel.get_surface_points()
+        hand_surface_points = self.target_handmodel.get_surface_points_palm()
+        hand_surface_points_ = hand_surface_points.detach().clone()
+
+        npts_object = self.object_point_cloud.size()[0]
+        npts_hand_surf = hand_surface_points.size()[1]
+        npts_hand_mesh = hand_mesh_points_.size()[1]
+
+        ############ Compute Contact Value ##################
+        batch_object_point_cloud = self.object_point_cloud.unsqueeze(0).repeat(
+            self.num_particles, 1, 1
+        )
+        batch_object_point_cloud = batch_object_point_cloud.reshape(
+            self.num_particles, 1, npts_object, 3
+        )
+        hand_surface_points = hand_surface_points.reshape(
+            self.num_particles, 1, npts_hand_surf, 3
+        )
+        # batch_object_point_cloud = batch_object_point_cloud.repeat(
+        #     1, npts_hand_surf, 1, 1
+        # ).transpose(1, 2)
+        # hand_surface_points = hand_surface_points.repeat(1, npts_object, 1, 1)
+
+        # object_hand_dist = (hand_surface_points - batch_object_point_cloud).norm(dim=3)
+
+        # contact_dist = object_hand_dist.min(dim=2)[0]
+        # contact_value_current = 1 - 2 * (
+        #     torch.sigmoid(self.sharp_factor * contact_dist) - 0.5
+        # )
+        # energy_contact = torch.abs(
+        #     contact_value_current - self.contact_value_goal.reshape(1, -1)
+        # ).mean(dim=1)
+
+        batch_object_point_cloud = batch_object_point_cloud.repeat(
+            1, npts_hand_surf, 1, 1
+        )
+        hand_surface_points = hand_surface_points.repeat(
+            1, npts_object, 1, 1
+        ).transpose(1, 2)
+
+        handsurf_object_dist = (hand_surface_points - batch_object_point_cloud).norm(
+            dim=3
+        )
+        handsurf_object_dist, _ = handsurf_object_dist.min(dim=2)
+        contact_dists = F.relu(handsurf_object_dist - self.threshold_dist)
+        energy_contact = contact_dists.mean(dim=1)
+
+        ############## Compute Collision Cost #################
+
+        batch_object_point_cloud = self.object_point_cloud.unsqueeze(0).repeat(
+            self.num_particles, 1, 1
+        )
+        batch_object_point_cloud = batch_object_point_cloud.reshape(
+            self.num_particles, 1, npts_object, 3
+        )
+        hand_mesh_points = hand_mesh_points_.reshape(
+            self.num_particles, 1, npts_hand_mesh, 3
+        )
+        hand_surface_points__ = self.target_handmodel.get_surface_points()
+        combined_hand_pts = torch.cat((hand_surface_points__, hand_mesh_points_), dim=1)
+        npts_hand_mesh = combined_hand_pts.shape[1]
+        hand_mesh_points = combined_hand_pts.reshape(self.num_particles, 1, -1, 3)
+
+        hand_mesh_points = hand_mesh_points.repeat(1, npts_object, 1, 1).transpose(1, 2)
+
+        batch_object_point_cloud = batch_object_point_cloud.repeat(
+            1, npts_hand_mesh, 1, 1
+        )
+
+        hand_object_dist = (hand_mesh_points - batch_object_point_cloud).norm(dim=3)
+        ###### SDF based collision loss -- assume watertight surface ######
+        hand_object_dist, hand_object_indices = hand_object_dist.min(dim=2)
+        hand_object_points = torch.stack(
+            [self.object_point_cloud[x, :] for x in hand_object_indices], dim=0
+        )
+        hand_object_normal = torch.stack(
+            [self.object_normal_cloud[x, :] for x in hand_object_indices], dim=0
+        )
+        hand_object_signs = (
+            (hand_object_points - combined_hand_pts) * hand_object_normal
+        ).sum(dim=2)
+        hand_object_signs = (hand_object_signs > 0).float()
+        energy_penetration = (hand_object_signs * hand_object_dist).mean(dim=1)
+
+        # # Basically penalize any gripper point that is too close (below a threshold)
+        # hand_object_dist, _ = hand_object_dist.min(dim=2)
+        # in_out_dists = F.relu(self.threshold_dist + 5e-3 - hand_object_dist)
+        # energy_penetration = in_out_dists.mean(dim=1)
 
         ############# Compute Total Energy #####################
         energy = (

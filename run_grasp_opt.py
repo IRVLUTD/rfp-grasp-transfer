@@ -20,6 +20,8 @@ from utils.pc_utils import (
     transform_to_camera_frame,
     compute_contact_map,
     compute_contact_map_aligned,
+    get_obb_points_normals,
+    filter_pts_lower_z,
 )
 
 from utils.fig_utils import (
@@ -145,12 +147,17 @@ def optimize_grasp(
     )
     q_standoff_grasp = get_q(RT_standoff, target_model)
     q_current_grasp = get_q(RT_current, target_model)
-    source_q = q_current_grasp  # NOTE: using the bad grasp as initial grasp
-    # source_q = q_standoff_grasp
+    # source_q = q_current_grasp  # NOTE: using the bad grasp as initial grasp
+    source_q = q_standoff_grasp
+
+    # # NOTE: Use gripper surface points for the contact map goal
+    # gripper_surf_pts_for_cmap = (
+    #     target_model.get_surface_points(q_current_grasp.unsqueeze(0))[0].cpu().numpy()
+    # )
 
     # NOTE: Use gripper surface points for the contact map goal
     gripper_surf_pts_for_cmap = (
-        target_model.get_surface_points(q_current_grasp.unsqueeze(0))[0].cpu().numpy()
+        target_model.get_surface_points(q_standoff_grasp.unsqueeze(0))[0].cpu().numpy()
     )
 
     if ENERGY_FUNC == "align_dist":
@@ -208,14 +215,17 @@ def optimize_grasp(
     # consideration
     # NOTE: 0.005 i.e 5mm used since using larger values effectively means that
     # we are scaling up the object --> could create issues in the optimization
-    augmented_obj_pts = objpc_pts + 0.005 * objpc_nrm
-    cmap_goal = np.concatenate(
-        [augmented_obj_pts, objpc_nrm, contact_map.reshape(-1, 1)], axis=1
-    )
+    # augmented_obj_pts = objpc_pts + 0.005 * objpc_nrm
+    # cmap_goal = np.concatenate(
+    #     [augmented_obj_pts, objpc_nrm, contact_map.reshape(-1, 1)], axis=1
+    # )
 
     # cmap_goal = np.concatenate(
     #     [objpc_pts, objpc_nrm, contact_map.reshape(-1, 1)], axis=1
     # )
+    obb_pts, obb_nrm = get_obb_points_normals(filter_pts_lower_z(objpc_pts))
+    contact_map = compute_contact_map(gripper_surf_pts_for_cmap, obb_pts, SHARP_FACTOR)
+    cmap_goal = np.concatenate([obb_pts, obb_nrm, contact_map.reshape(-1, 1)], axis=1)
     cmap_tensor = torch.tensor(cmap_goal)
 
     grasp_transfer_opt = AdamGraspCmap(
@@ -260,8 +270,9 @@ def optimize_grasp(
     ############### GrasOpt Result Viz ################
     # VIZ: Local Obj PC region and Gripper Pts + Contact Map
     vis_data = []
-    vis_data += [plot_point_cloud_cmap(objpc_pts, color_levels=contact_map, size=4)]
-
+    # vis_data += [plot_point_cloud_cmap(objpc_pts, color_levels=contact_map, size=2)]
+    vis_data += [plot_point_cloud(objpc_pts, color="gray", size=2)]
+    vis_data += [plot_point_cloud(obb_pts, color="black", size=1.5)]
     # vis_data += [plot_point_cloud(augmented_obj_pts, color="blue", opacity=0.3)]
 
     # hand_mesh_pts = (
@@ -315,6 +326,9 @@ def optimize_grasp(
         "RT_standoff": RT_standoff,
         "RT_current": RT_current,
     }
+    # print(econ_traj)
+    # print(epen_traj)
+    # print(energy_traj)
 
     return return_data
 
@@ -409,10 +423,13 @@ if __name__ == "__main__":
     try:
         # 1. pointclod, grasp from npz file
         # 2. save grasp in another npz file
-        input_fname = "/tmp/opt_data.npz"
-        # input_fname = "/home/ninad/Datasets/MMDemo/grasp_opt_trial_march17-selected/hammer-corrected/opt_data.npz"
-        # input_fname = "/home/ninad/Datasets/MMDemo/grasp_opt_trial_march17-selected/utd-bottle-shelf-corrected/opt_data.npz"
-        # input_fname = "/home/ninad/Datasets/MMDemo/newtest/opt_data.npz"
+        # input_fname = "/tmp/opt_data.npz"
+        input_fname = "/home/ninad/Datasets/MMDemo/testing/soupcan/s1_opt_data.npz"
+        # input_fname = "/home/ninad/Datasets/MMDemo/testing/box/b3_opt_data.npz"
+        # obj_name = "clamp"
+        # input_fname = (
+        #     f"/home/ninad/Datasets/MMDemo/testing/{obj_name}/{obj_name}_opt_data.npz"
+        # )
         data = np.load(input_fname)
         obj_pc_first_view = data["object_pc"]
         RT_current = data["RT_grasp"]
@@ -424,8 +441,8 @@ if __name__ == "__main__":
             RT_current=RT_current,
             device=device,
             energy_func="euclidean_dist",
-            sharp_factor=20,
-            weight_collision=1,
+            sharp_factor=50,
+            weight_collision=2,
             weight_contact=0.5,
             num_opt_iters=100,
             num_parallel_opt=4,
