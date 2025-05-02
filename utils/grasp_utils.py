@@ -570,6 +570,3 @@ def get_mgg_aligned_RT_grasp(
     target_grasp_7d = convert_aligned_to_gripper_pose(aligned_grasp_7d, target_gripper)
     RT_target_grasp = convert_7dpose_to_4x4(target_grasp_7d)
     return RT_target_grasp
-
-
-def convert_4x4_to_9D
