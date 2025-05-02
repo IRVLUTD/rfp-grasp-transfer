@@ -13,7 +13,13 @@ def get_rot6d_from_rot3d(rot3d):
     global_rotation = np.array(
         transforms3d.euler.euler2mat(rot3d[0], rot3d[1], rot3d[2])
     )
-    return global_rotation.T.reshape(9)[:6]
+    # return global_rotation.T.reshape(9)[:6]
+    return get_rot6d_from_rotmat(global_rotation)
+
+
+def get_rot6d_from_rotmat(rotn_matrix):
+    rot6d = rotn_matrix.T.reshape(-1)[:6]
+    return rot6d
 
 
 def compute_rotation_matrix_from_ortho6d(poses):
