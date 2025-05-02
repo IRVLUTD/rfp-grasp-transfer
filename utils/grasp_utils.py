@@ -557,6 +557,10 @@ def get_urdf_path(gripper_name):
         return "sawyer/sawyer.urdf"
     elif gripper_name == "h5_hand":
         return "h5_hand/h5_hand.urdf"
+    elif gripper_name == "mano_right":
+        return "mano_right/mano_right.urdf"
+    elif gripper_name == "mano_left":
+        return "mano_left/mano_left.urdf"
     else:
         print("[ERROR]: INVALID Gripper name. Returning empty string!!!")
         return ""
@@ -570,3 +574,14 @@ def get_mgg_aligned_RT_grasp(
     target_grasp_7d = convert_aligned_to_gripper_pose(aligned_grasp_7d, target_gripper)
     RT_target_grasp = convert_7dpose_to_4x4(target_grasp_7d)
     return RT_target_grasp
+
+
+def get_base_pose(grasp_pose_wxyz):
+    """
+    grasp pose: (x, y, z, quat_wxyz)
+    """
+    base_pose = np.eye(4)
+    base_pose[:3, 3] = grasp_pose_wxyz[:3]
+    rot_quat = np.quaternion(*grasp_pose_wxyz[3:])
+    base_pose[:3, :3] = quaternion.as_rotation_matrix(rot_quat)
+    return base_pose
