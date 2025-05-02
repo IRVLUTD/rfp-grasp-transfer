@@ -50,7 +50,7 @@ class GcsHandModel:
             full_mesh_pts = np.array(
                 trimesh.sample.sample_surface_even(
                     mesh=full_gripper_mesh.copy(),
-                    count=512,
+                    count=2048,
                     seed=42,
                 )[0]
             )
@@ -340,7 +340,7 @@ class GcsHandModel:
         surface_points = []
         if self.robot_name == "allegro":
             palm_list = ["base_link"]
-        elif self.robot_name == "robotiq_3finger_real_robot":
+        elif self.robot_name in {"robotiq_3finger_real_robot", "fetch_gripper"}:
             palm_list = ["palm"]
         else:
             raise NotImplementedError
