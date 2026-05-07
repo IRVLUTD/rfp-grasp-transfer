@@ -155,14 +155,10 @@ class GcsGraspTransferOpt:
         energy_func_name="euclidean_dist",
     ):
 
-        self.target_handmodel = get_handmodel(
-            self.target_robot_name,
-            self.num_particles,
-            self.device,
-            hand_scale=1.0,
-            json_path=self._target_gripper_json_path,
-            datadir=self._target_gripper_datadir,
-        )
+        # target_handmodel was already built in __init__ for (target_robot_name,
+        # num_particles, device); URDF parsing + chain construction don't depend
+        # on per-frame inputs, so reusing it is safe. Kinematics state gets re-
+        # set via update_kinematics(q=q_pose) further down.
         if energy_func_name not in {"euclidean_dist"}:
             raise NotImplementedError
 

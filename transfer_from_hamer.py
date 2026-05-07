@@ -72,6 +72,7 @@ def transfer_grasp_handler(
     target_model: GcsHandModel,
     source_models: LeftRightTuple,
     manopyb_models: LeftRightTuple,
+    grasp_transfer_opts: LeftRightTuple,
 ):
     """
     Can potentially contain data for both left and right hands so this
@@ -86,6 +87,10 @@ def transfer_grasp_handler(
     - manopyb_models: Tuple for mano_pybullet models of (mano_left, mano_right)
 
     - target_model: target gcs hand model
+
+    - grasp_transfer_opts: Tuple of pre-built AdamGraspTransfer instances
+        (left, right). These are reused across frames; building them per-frame
+        re-runs URDF parsing and correspondence calc.
     """
     rl_index = hamer_data["rl_index"]
     num_detected = hamer_data["num_detected"]
@@ -107,6 +112,7 @@ def transfer_grasp_handler(
             manopyb_models.right,
             target_model,
             is_left=False,
+            grasp_transfer_opt=grasp_transfer_opts.right,
         )
 
         source_data_left = extract_source_data(mano_params, translation, left_idxs)
@@ -116,6 +122,7 @@ def transfer_grasp_handler(
             manopyb_models.left,
             target_model,
             is_left=True,
+            grasp_transfer_opt=grasp_transfer_opts.left,
         )
 
         # right_idxs and left_idxs will be a list with single element, indexing into hamer output batched array
@@ -138,6 +145,7 @@ def transfer_grasp_handler(
                 manopyb_models.right,
                 target_model,
                 is_left=False,
+                grasp_transfer_opt=grasp_transfer_opts.right,
             )
             result = [RT_target_right]
             plots = LeftRightTuple(left=None, right=fig_right)
@@ -150,6 +158,7 @@ def transfer_grasp_handler(
                 manopyb_models.left,
                 target_model,
                 is_left=True,
+                grasp_transfer_opt=grasp_transfer_opts.left,
             )
             result = [RT_target_left]
             plots = LeftRightTuple(left=fig_left, right=None)
@@ -164,6 +173,7 @@ def transfer_grasp(
     manopyb_model: HandModel20,
     target_model: GcsHandModel,
     is_left: bool,
+    grasp_transfer_opt: "AdamGraspTransfer" = None,
 ):
     hand_rot_mat = source_data["hand_rot_mat"]
     hand_theta_mat = source_data["hand_thetas"]
@@ -218,13 +228,16 @@ def transfer_grasp(
         .float()
     )
 
-    # print("POSE:", grasp_pose)
-    grasp_transfer_opt = AdamGraspTransfer(
-        source_model.robot_name,
-        target_model.robot_name,
-        learning_rate=1e-3,
-        device=source_model.device,
-    )
+    # Build per-call as a fallback if a pre-built optimizer wasn't passed in.
+    # Hot-path callers should pass grasp_transfer_opt to avoid the URDF reload
+    # and correspondence rebuild that happens in __init__.
+    if grasp_transfer_opt is None:
+        grasp_transfer_opt = AdamGraspTransfer(
+            source_model.robot_name,
+            target_model.robot_name,
+            learning_rate=1e-3,
+            device=source_model.device,
+        )
 
     q_traj, energy, _ = grasp_transfer_opt.run_adam(
         source_grasp_q.squeeze(0), running_name="test"
@@ -337,6 +350,26 @@ def main(args):
     source_models = LeftRightTuple(left=_source_model_left, right=_source_model_right)
     manopyb_models = LeftRightTuple(left=_manopyb_left, right=_manopyb_right)
 
+    # Build the AdamGraspTransfer optimizers once (left/right) and reuse across frames.
+    # Each instance loads URDF + builds the kinematic chain in its constructor; doing
+    # this per-frame was a major cost.
+    grasp_transfer_opts = LeftRightTuple(
+        left=AdamGraspTransfer(
+            _source_model_left.robot_name,
+            target_model.robot_name,
+            learning_rate=1e-3,
+            max_iter=args.max_iter,
+            device=device,
+        ),
+        right=AdamGraspTransfer(
+            _source_model_right.robot_name,
+            target_model.robot_name,
+            learning_rate=1e-3,
+            max_iter=args.max_iter,
+            device=device,
+        ),
+    )
+
     # Populate a list of hamer output npz files to iterate over and transfer grasp
     npz_files = [
         f
@@ -363,7 +396,7 @@ def main(args):
         )  # load the npz as dict to be able to update later
         hamer_data = process_hamer_output(npz_data)
         RT_result, plots, meshes = transfer_grasp_handler(
-            hamer_data, target_model, source_models, manopyb_models
+            hamer_data, target_model, source_models, manopyb_models, grasp_transfer_opts
         )
         npz_data["target_transfer_pose"] = RT_result
         np.savez(npz_fpath, **npz_data)
@@ -443,6 +476,12 @@ def make_parser():
         "--debug_plots",
         action="store_true",
         help="This creates a ~ 5MB html plot for each frame, so only use for debugging and delete its folder after use!",
+    )
+    parser.add_argument(
+        "--max_iter",
+        type=int,
+        default=100,
+        help="Adam optimization iterations per frame (was 300; 100 is usually enough at 32 particles).",
     )
     parser.add_argument(
         "-d",
