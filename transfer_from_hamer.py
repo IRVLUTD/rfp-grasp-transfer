@@ -359,6 +359,7 @@ def main(args):
             target_model.robot_name,
             learning_rate=1e-3,
             max_iter=args.max_iter,
+            num_particles=args.num_particles,
             device=device,
         ),
         right=AdamGraspTransfer(
@@ -366,6 +367,7 @@ def main(args):
             target_model.robot_name,
             learning_rate=1e-3,
             max_iter=args.max_iter,
+            num_particles=args.num_particles,
             device=device,
         ),
     )
@@ -389,7 +391,10 @@ def main(args):
             f"\n[NOTE] Debuggig arg passed, creating/checking dir:{transfer_extra_dir}.\nConsider deleting it after debugging!\n"
         )
 
+    import time as _time
+    frame_times = []
     for npz_f in tqdm(sorted(npz_files)):
+        t_frame = _time.time()
         npz_fpath = osp.join(hamer_npz_dir, npz_f)
         npz_data = dict(
             np.load(npz_fpath, allow_pickle=True)
@@ -398,6 +403,7 @@ def main(args):
         RT_result, plots, meshes = transfer_grasp_handler(
             hamer_data, target_model, source_models, manopyb_models, grasp_transfer_opts
         )
+        frame_times.append(_time.time() - t_frame)
         npz_data["target_transfer_pose"] = RT_result
         np.savez(npz_fpath, **npz_data)
 
@@ -444,6 +450,10 @@ def main(args):
                 fig = go.Figure(data=vis_data)
                 fig.write_html(osp.join(transfer_extra_dir, f"{fname}_1.html"))
 
+    if frame_times:
+        avg = sum(frame_times) / len(frame_times)
+        print(f"[grasp-transfer] processed {len(frame_times)} frames | avg {avg*1000:.1f} ms/frame | total {sum(frame_times):.1f}s")
+
 
 def make_parser():
     parser = argparse.ArgumentParser(
@@ -480,8 +490,14 @@ def make_parser():
     parser.add_argument(
         "--max_iter",
         type=int,
-        default=100,
-        help="Adam optimization iterations per frame (was 300; 100 is usually enough at 32 particles).",
+        default=50,
+        help="Adam optimization iterations per frame. With warm-starting and 16 particles, 50 typically converges (was 300).",
+    )
+    parser.add_argument(
+        "--num_particles",
+        type=int,
+        default=16,
+        help="Particle batch size for the Adam grasp-transfer optimizer (was 32). Lower = faster, slight quality hit.",
     )
     parser.add_argument(
         "-d",

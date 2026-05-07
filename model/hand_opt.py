@@ -770,8 +770,12 @@ class AdamGraspTransfer:
             energy_func_name=self.energy_func_name,
             device=device,
         )
+        # Warm-start cache for run_adam(warm_start=True). Stores the final
+        # q_current tensor from the previous run; hand poses change smoothly so
+        # seeding the next frame near the answer cuts iters significantly.
+        self._last_q = None
 
-    def run_adam(self, source_grasp_goal, running_name, source_pose_align=None):
+    def run_adam(self, source_grasp_goal, running_name, source_pose_align=None, warm_start=True):
 
         if not source_pose_align:
             # compute the aligned source pose here:
@@ -796,6 +800,17 @@ class AdamGraspTransfer:
         self.opt_model.reset(
             source_grasp_goal, source_pose_align, running_name, self.energy_func_name
         )
+
+        # Warm-start: if we have a prior solution and shapes line up, overwrite
+        # q_current in-place so Adam continues from there. Optimizer moment buffers
+        # were just (re)initialized in reset(), which is fine — we deliberately
+        # don't carry them since the source pose has changed.
+        if warm_start and self._last_q is not None:
+            try:
+                if self._last_q.shape == self.opt_model.q_current.shape:
+                    self.opt_model.set_opt_q(self._last_q)
+            except Exception:
+                pass
 
         with torch.no_grad():
             opt_q = self.opt_model.get_opt_q()
@@ -833,6 +848,8 @@ class AdamGraspTransfer:
                         global_step=i_iter,
                     )
         q_trajectory = torch.stack(q_trajectory, dim=0).transpose(0, 1)
+        # Stash the final q_current for next-frame warm-start.
+        self._last_q = self.opt_model.get_opt_q().clone()
         return (
             q_trajectory,
             self.opt_model.energy.detach().cpu().clone(),
