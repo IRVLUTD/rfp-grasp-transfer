@@ -155,10 +155,22 @@ class GcsGraspTransferOpt:
         energy_func_name="euclidean_dist",
     ):
 
-        # target_handmodel was already built in __init__ for (target_robot_name,
-        # num_particles, device); URDF parsing + chain construction don't depend
-        # on per-frame inputs, so reusing it is safe. Kinematics state gets re-
-        # set via update_kinematics(q=q_pose) further down.
+        # NOTE: rebuilding target_handmodel here is intentional. An earlier
+        # commit on this branch tried to skip the reload (URDF + chain are
+        # static, so it looked redundant), but benchmarking showed an ~8x
+        # per-iteration regression after a few frames — pytorch_kinematics
+        # retains state across reuses of the same chain that compounds with
+        # each step()'s update_kinematics call. Reloading wipes that cheaply
+        # (~tens of ms); leaving it stale costs hundreds of ms per frame.
+        self.target_handmodel = get_handmodel(
+            self.target_robot_name,
+            self.num_particles,
+            self.device,
+            hand_scale=1.0,
+            json_path=self._target_gripper_json_path,
+            datadir=self._target_gripper_datadir,
+        )
+
         if energy_func_name not in {"euclidean_dist"}:
             raise NotImplementedError
 
