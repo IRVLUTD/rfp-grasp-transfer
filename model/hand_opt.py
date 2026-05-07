@@ -126,6 +126,11 @@ class GcsGraspTransferOpt:
         )
         self.q_joint_lower = self.target_handmodel.dynamic_joints_q_lower.detach()
         self.q_joint_upper = self.target_handmodel.dynamic_joints_q_upper.detach()
+        # Correspondence between source/target gripper_coords_all is a deterministic
+        # function of two static tensors loaded from pickle (one per source robot,
+        # one per target robot) and never changes per-frame. Cache once here so
+        # reset() doesn't recompute the spherical-distance matrix every frame.
+        self._cached_corr_idxs = None
 
         # We optimize only for the pose if the gripper is two finger gripper
         self.only_pose_opt = target_robot_name in {
@@ -190,13 +195,14 @@ class GcsGraspTransferOpt:
         self.source_handmodel.update_kinematics(source_grasp_goal.unsqueeze(0))
         self.source_pose_align = source_pose_align
 
-        # Get correspondence between source and target gripper coords
-        # Use this for the closest energy distance computation
-        self.source_corr_idxs, self.target_corr_idxs = (
-            self.target_handmodel.grasp_transfer_correspondence(
+        # Correspondence depends only on the (source_robot, target_robot) pair —
+        # the underlying gripper_coords_all tensors are loaded once from pickle
+        # and never mutate. Cache across reset() calls.
+        if self._cached_corr_idxs is None:
+            self._cached_corr_idxs = self.target_handmodel.grasp_transfer_correspondence(
                 self.source_handmodel.gripper_coords_all
             )
-        )
+        self.source_corr_idxs, self.target_corr_idxs = self._cached_corr_idxs
 
         # initialize the opt for grasp = (posn, rotn, dof joints)
         q_pose = torch.zeros(self.num_particles, 9, device=self.device)
@@ -782,10 +788,12 @@ class AdamGraspTransfer:
             energy_func_name=self.energy_func_name,
             device=device,
         )
-        # Warm-start cache for run_adam(warm_start=True). Stores the final
-        # q_current tensor from the previous run; hand poses change smoothly so
-        # seeding the next frame near the answer cuts iters significantly.
+        # Warm-start cache for run_adam(warm_start=True). _last_q stores the final
+        # per-particle q_current tensor from the previous run; _last_energy is
+        # the per-particle energy used to pick the best particle for jittered
+        # init on the next frame.
         self._last_q = None
+        self._last_energy = None
 
     def run_adam(self, source_grasp_goal, running_name, source_pose_align=None, warm_start=True):
 
@@ -813,14 +821,28 @@ class AdamGraspTransfer:
             source_grasp_goal, source_pose_align, running_name, self.energy_func_name
         )
 
-        # Warm-start: if we have a prior solution and shapes line up, overwrite
-        # q_current in-place so Adam continues from there. Optimizer moment buffers
-        # were just (re)initialized in reset(), which is fine — we deliberately
-        # don't carry them since the source pose has changed.
-        if warm_start and self._last_q is not None:
+        # Warm-start: if we have a prior solution and shapes line up, seed Adam
+        # from there. Optimizer moment buffers were just (re)initialized in reset(),
+        # which is fine — we deliberately don't carry them since the source pose
+        # has changed.
+        #
+        # Smarter than copying the full prior q_current verbatim (which carries
+        # both good and bad particles): take the best particle from the prior
+        # frame's energy and replicate it across all num_particles with small
+        # jitter. Particle 0 keeps the exact warm-start; the others explore a
+        # neighborhood around it. This converges faster than naive replication
+        # because every particle now starts near the prior-frame optimum, with
+        # diversity coming from the jitter.
+        if warm_start and self._last_q is not None and self._last_energy is not None:
             try:
                 if self._last_q.shape == self.opt_model.q_current.shape:
-                    self.opt_model.set_opt_q(self._last_q)
+                    best_idx = int(self._last_energy.argmin())
+                    best_q = self._last_q[best_idx:best_idx + 1]   # (1, q_dim)
+                    n = self.opt_model.q_current.shape[0]
+                    jitter = torch.randn_like(self._last_q) * 0.02
+                    jitter[0].zero_()  # particle 0 = exact warm-start
+                    warm_q = best_q.expand(n, -1).contiguous() + jitter.to(best_q.device)
+                    self.opt_model.set_opt_q(warm_q)
             except Exception:
                 pass
 
@@ -860,11 +882,12 @@ class AdamGraspTransfer:
                         global_step=i_iter,
                     )
         q_trajectory = torch.stack(q_trajectory, dim=0).transpose(0, 1)
-        # Stash the final q_current for next-frame warm-start.
+        # Stash the final q_current + energy for next-frame jittered warm-start.
         self._last_q = self.opt_model.get_opt_q().clone()
+        self._last_energy = self.opt_model.energy.detach().cpu().clone()
         return (
             q_trajectory,
-            self.opt_model.energy.detach().cpu().clone(),
+            self._last_energy,
             self.steps_per_iter,
         )
 
