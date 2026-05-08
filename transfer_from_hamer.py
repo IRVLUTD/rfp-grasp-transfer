@@ -15,7 +15,7 @@ from mano_pybullet.hand_model import HandModel20
 
 from utils.grasp_utils import get_handmodel, rotation_matrix_from_vectors
 from utils.rot6d_utils import mat2rvec, robust_compute_rotation_matrix_from_ortho6d
-from model.hand_opt import AdamGraspTransfer
+from model.hand_opt import AdamGraspTransfer, BatchedAdamGraspTransfer
 from model.hand_model import GcsHandModel
 
 from typing import Dict
@@ -419,6 +419,191 @@ def main(args):
 
     import time as _time
     frame_times = []
+
+    # ------------- Batched path (frame_batch_size > 1) -------------
+    if args.frame_batch_size > 1:
+        F = args.frame_batch_size
+        print(f"[batched] frame_batch_size={F} num_particles={args.num_particles} "
+              f"max_iter={args.max_iter}")
+        # Build batched optimizers (left/right). These have target_handmodel
+        # sized for F * num_particles.
+        batched_opts = LeftRightTuple(
+            left=BatchedAdamGraspTransfer(
+                _source_model_left.robot_name, target_model.robot_name,
+                frame_batch_size=F, num_particles=args.num_particles,
+                max_iter=args.max_iter, learning_rate=1e-3, device=device,
+            ),
+            right=BatchedAdamGraspTransfer(
+                _source_model_right.robot_name, target_model.robot_name,
+                frame_batch_size=F, num_particles=args.num_particles,
+                max_iter=args.max_iter, learning_rate=1e-3, device=device,
+            ),
+        )
+
+        sorted_files = sorted(npz_files)
+        # Process frames in chunks of size F. The last chunk may be smaller;
+        # we pad it by repeating the last frame (results for padding are
+        # discarded after).
+        for chunk_start in tqdm(range(0, len(sorted_files), F)):
+            t_chunk = _time.time()
+            chunk = sorted_files[chunk_start:chunk_start + F]
+            real_len = len(chunk)
+            while len(chunk) < F:
+                chunk.append(chunk[-1])  # pad
+
+            # Pre-process: load npz, build source_grasp_q per (frame, hand-side).
+            chunk_npz = []
+            chunk_hamer = []
+            for npz_f in chunk:
+                npz_fpath = osp.join(hamer_npz_dir, npz_f)
+                npz_data = dict(np.load(npz_fpath, allow_pickle=True))
+                chunk_npz.append((npz_fpath, npz_data))
+                chunk_hamer.append(process_hamer_output(npz_data))
+
+            def _build_source_q(source_data, manopyb_model, target_model, is_left):
+                """Reproduce the pre-Adam math from transfer_grasp.
+                Returns source_grasp_q tensor (q_dim,)."""
+                hand_rot_mat = source_data["hand_rot_mat"].copy()
+                hand_theta_mat = source_data["hand_thetas"].copy()
+                trans = source_data["translation"]
+                if is_left:
+                    hand_rot_mat[1::3] *= -1
+                    hand_rot_mat[2::3] *= -1
+                    # Matches transfer_grasp's exact (buggy-but-shipped) behavior:
+                    # the original writes hand_theta_mat[1::3] *= -1 twice, which
+                    # is a no-op. Do not collapse to a single negation — it would
+                    # produce non-orthogonal matrices that mat2rvec rejects.
+                    hand_theta_mat[1::3] *= -1
+                    hand_theta_mat[1::3] *= -1
+                hand_theta_full = np.array(
+                    [mat2rvec(hand_rot_mat)]
+                    + [mat2rvec(hand_theta_mat[i]) for i in range(hand_theta_mat.shape[0])]
+                )
+                angles, palm_basis = manopyb_model.mano_to_angles(hand_theta_full)
+                pyb_model_origin = manopyb_model.origins()[0]
+                palm_trans = trans + pyb_model_origin - palm_basis @ pyb_model_origin
+                actual_trans = np.array(palm_trans)
+                actual_basis = np.array(palm_basis)
+                if is_left:
+                    R_x = np.array([[1, 0, 0], [0, -1, 0], [0, 0, -1]])
+                    actual_basis = np.dot(actual_basis, R_x)
+                grasp_pose = torch.zeros(9)
+                grasp_pose[3:] = torch.tensor(actual_basis.T.reshape(-1)[:6])
+                grasp_pose[:3] = torch.tensor(actual_trans)
+                grasp_dofs = -1 * torch.tensor(angles) if is_left else torch.tensor(angles)
+                return torch.cat([grasp_pose, grasp_dofs]).float()
+
+            # Collect per-side source_qs (only for frames that have that hand).
+            left_qs, left_idxs_in_chunk = [], []
+            right_qs, right_idxs_in_chunk = [], []
+            for ci, hd in enumerate(chunk_hamer):
+                if hd["right_idxs"].size:
+                    sd = extract_source_data(
+                        hd["mano_params"], hd["translation"], hd["right_idxs"]
+                    )
+                    right_qs.append(_build_source_q(
+                        sd, manopyb_models.right, target_model, is_left=False))
+                    right_idxs_in_chunk.append(ci)
+                if hd["left_idxs"].size:
+                    sd = extract_source_data(
+                        hd["mano_params"], hd["translation"], hd["left_idxs"]
+                    )
+                    left_qs.append(_build_source_q(
+                        sd, manopyb_models.left, target_model, is_left=True))
+                    left_idxs_in_chunk.append(ci)
+
+            # Pad each side's list to exactly F before batched call.
+            def _pad_to_F(qs):
+                if not qs:
+                    return None
+                while len(qs) < F:
+                    qs.append(qs[-1])
+                return qs
+
+            right_qs_padded = _pad_to_F(right_qs[:])
+            left_qs_padded = _pad_to_F(left_qs[:])
+
+            # Run batched Adam for each side.
+            right_results = batched_opts.right.run_adam_multi(right_qs_padded) \
+                if right_qs_padded else []
+            left_results = batched_opts.left.run_adam_multi(left_qs_padded) \
+                if left_qs_padded else []
+
+            # Per-frame post-processing: extract RT, plotly mesh, save PLY+npz.
+            for ci in range(real_len):
+                npz_fpath, npz_data = chunk_npz[ci]
+                hd = chunk_hamer[ci]
+                num_detected = hd["num_detected"]
+                rl_index = hd["rl_index"]
+
+                def _q_to_RT(target_grasp_q):
+                    target_rot6d = target_grasp_q[3:9]
+                    target_trans = target_grasp_q[:3].cpu().numpy()
+                    target_rot_mat = (
+                        robust_compute_rotation_matrix_from_ortho6d(target_rot6d.unsqueeze(0))
+                        .squeeze(1).cpu().numpy()
+                    )
+                    RT = np.eye(4)
+                    RT[:3, :3] = target_rot_mat
+                    RT[:3, 3] = target_trans
+                    return RT
+
+                def _mesh_from_q(target_grasp_q):
+                    if target_grasp_q.shape[0] != 9 + len(target_model.dynamic_joints):
+                        target_grasp_q = torch.cat(
+                            (target_grasp_q,
+                             (target_model.dynamic_joints_q_upper[0]
+                              - target_model.dynamic_joints_q_mid[0])),
+                            dim=0,
+                        )
+                    plotly_meshes = target_model.get_plotly_data(
+                        q=target_grasp_q.unsqueeze(0).float().to(target_model.device),
+                        color="green", opacity=0.3,
+                    )
+                    parts = []
+                    for m in plotly_meshes:
+                        parts.append(trimesh.Trimesh(
+                            vertices=np.array([m.x, m.y, m.z]).T,
+                            faces=np.array([m.i, m.j, m.k]).T,
+                        ))
+                    return trimesh.util.concatenate(parts)
+
+                # Locate this frame's results in the per-side lists.
+                ri = right_idxs_in_chunk.index(ci) if ci in right_idxs_in_chunk else None
+                li = left_idxs_in_chunk.index(ci) if ci in left_idxs_in_chunk else None
+                RT_right = _q_to_RT(right_results[ri][0]) if ri is not None else None
+                RT_left = _q_to_RT(left_results[li][0]) if li is not None else None
+
+                # Re-merge into the same RT_result layout that transfer_grasp_handler produces.
+                if num_detected > 1:
+                    rt_arr = [None, None]
+                    rt_arr[hd["right_idxs"][0]] = RT_right
+                    rt_arr[hd["left_idxs"][0]] = RT_left
+                    RT_result = np.array(rt_arr)
+                else:
+                    RT_result = np.array([RT_right if ri is not None else RT_left])
+
+                npz_data["target_transfer_pose"] = RT_result
+                np.savez(npz_fpath, **npz_data)
+
+                fname, _ = os.path.splitext(os.path.basename(npz_fpath))
+                if li is not None:
+                    _mesh_from_q(left_results[li][0]).export(
+                        osp.join(transfer_mesh_dir, f"{fname}_0.ply"))
+                if ri is not None:
+                    _mesh_from_q(right_results[ri][0]).export(
+                        osp.join(transfer_mesh_dir, f"{fname}_1.ply"))
+
+            frame_times.append((_time.time() - t_chunk) / real_len)
+
+        if frame_times:
+            avg = sum(frame_times) / len(frame_times)
+            print(f"[grasp-transfer] processed {len(sorted_files)} frames "
+                  f"(batched, F={F}) | avg {avg*1000:.1f} ms/frame | "
+                  f"total {sum(frame_times)*F:.1f}s")
+        return  # end batched path
+
+    # ------------- Per-frame path (frame_batch_size == 1, original behavior) -------------
     for npz_f in tqdm(sorted(npz_files)):
         t_frame = _time.time()
         npz_fpath = osp.join(hamer_npz_dir, npz_f)
@@ -525,6 +710,16 @@ def make_parser():
         type=int,
         default=16,
         help="Particle batch size for the Adam grasp-transfer optimizer (was 32). Lower = faster, slight quality hit.",
+    )
+    parser.add_argument(
+        "--frame_batch_size",
+        type=int,
+        default=1,
+        help="Number of frames to optimize together in one Adam call via "
+             "BatchedAdamGraspTransfer. Default 1 keeps the original per-frame "
+             "loop. Values like 4-16 process multiple frames in parallel on GPU, "
+             "amortizing kernel-launch overhead. Loses temporal warm-start within "
+             "a batch; use only for offline preprocessing.",
     )
     parser.add_argument(
         "-d",
