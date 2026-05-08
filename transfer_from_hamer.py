@@ -181,6 +181,9 @@ def transfer_grasp(
     grasp_transfer_opt: "AdamGraspTransfer" = None,
     want_vis_data: bool = False,
 ):
+    import time as _t
+    _stage = {}
+    _t0 = _t.time()
     hand_rot_mat = source_data["hand_rot_mat"]
     hand_theta_mat = source_data["hand_thetas"]
     trans = source_data["translation"]
@@ -245,9 +248,13 @@ def transfer_grasp(
             device=source_model.device,
         )
 
+    _stage["pre_adam"] = _t.time() - _t0
+    _t1 = _t.time()
     q_traj, energy, _ = grasp_transfer_opt.run_adam(
         source_grasp_q.squeeze(0), running_name="test"
     )
+    _stage["run_adam"] = _t.time() - _t1
+    _t2 = _t.time()
     min_energy_index = energy.min(dim=0)[1].item()
     best_target_q = q_traj[min_energy_index, -1]
     target_grasp_q = best_target_q.detach()
@@ -281,6 +288,7 @@ def transfer_grasp(
     # target_gripper_mesh_data is required (we extract trimesh data from it for
     # the mandatory PLY export). source_model.get_plotly_data is only consumed
     # by the optional --debug_plots viz path; skip it when not needed.
+    _t3 = _t.time()
     target_gripper_mesh_data = target_model.get_plotly_data(
         q=target_grasp_q.unsqueeze(0).float().to(target_model.device),
         color="green",
@@ -291,15 +299,23 @@ def transfer_grasp(
         vis_data += target_gripper_mesh_data
     else:
         vis_data = []
+    _stage["plotly"] = _t.time() - _t3
 
     # Target gripper mesh
+    _t4 = _t.time()
     target_grp_trimesh = []
     for mesh in target_gripper_mesh_data:
         vertices = np.array([mesh.x, mesh.y, mesh.z]).T
         faces = np.array([mesh.i, mesh.j, mesh.k]).T
         target_grp_trimesh.append(trimesh.Trimesh(vertices=vertices, faces=faces))
     target_mesh = trimesh.util.concatenate(target_grp_trimesh)
+    _stage["trimesh"] = _t.time() - _t4
 
+    if os.environ.get("FASTEN_PROFILE"):
+        print(
+            "[transfer_grasp]",
+            " | ".join(f"{k}={v*1000:.0f}ms" for k, v in _stage.items()),
+        )
     return target_RT, vis_data, target_mesh
 
 
