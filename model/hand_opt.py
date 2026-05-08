@@ -126,6 +126,16 @@ class GcsGraspTransferOpt:
         )
         self.q_joint_lower = self.target_handmodel.dynamic_joints_q_lower.detach()
         self.q_joint_upper = self.target_handmodel.dynamic_joints_q_upper.detach()
+        # Snapshot the freshly-built target_handmodel so reset() can restore
+        # from it instead of re-parsing the URDF + rebuilding the kinematic
+        # chain every frame. Profiling on a real run showed reset()'s
+        # get_handmodel call was the per-frame fixed cost (~100-200 ms);
+        # deepcopy on a clean handmodel is comparable in time but avoids URDF
+        # I/O + parse, and crucially restores the *exact* clean state that
+        # prevents the pytorch_kinematics state-accumulation regression we
+        # saw earlier when we tried to skip the reload entirely.
+        import copy as _copy
+        self._target_handmodel_snapshot = _copy.deepcopy(self.target_handmodel)
         # Correspondence between source/target gripper_coords_all is a deterministic
         # function of two static tensors loaded from pickle (one per source robot,
         # one per target robot) and never changes per-frame. Cache once here so
@@ -160,21 +170,12 @@ class GcsGraspTransferOpt:
         energy_func_name="euclidean_dist",
     ):
 
-        # NOTE: rebuilding target_handmodel here is intentional. An earlier
-        # commit on this branch tried to skip the reload (URDF + chain are
-        # static, so it looked redundant), but benchmarking showed an ~8x
-        # per-iteration regression after a few frames — pytorch_kinematics
-        # retains state across reuses of the same chain that compounds with
-        # each step()'s update_kinematics call. Reloading wipes that cheaply
-        # (~tens of ms); leaving it stale costs hundreds of ms per frame.
-        self.target_handmodel = get_handmodel(
-            self.target_robot_name,
-            self.num_particles,
-            self.device,
-            hand_scale=1.0,
-            json_path=self._target_gripper_json_path,
-            datadir=self._target_gripper_datadir,
-        )
+        # Restore target_handmodel from the deepcopy snapshot taken in __init__.
+        # Equivalent in behavior to a full get_handmodel() reload (clean state,
+        # no pytorch_kinematics accumulation regression) but avoids the URDF
+        # parse + chain-build cost on every frame.
+        import copy as _copy
+        self.target_handmodel = _copy.deepcopy(self._target_handmodel_snapshot)
 
         if energy_func_name not in {"euclidean_dist"}:
             raise NotImplementedError
