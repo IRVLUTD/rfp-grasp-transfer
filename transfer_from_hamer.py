@@ -2,24 +2,36 @@ import sys
 import os
 import os.path as osp
 import argparse
-from tqdm import tqdm
-
-import torch
-import trimesh
-import numpy as np
-
-from transforms3d.axangles import axangle2mat, mat2axangle
-import plotly.graph_objects as go
-
-from mano_pybullet.hand_model import HandModel20
-
-from utils.grasp_utils import get_handmodel, rotation_matrix_from_vectors
-from utils.rot6d_utils import mat2rvec, robust_compute_rotation_matrix_from_ortho6d
-from model.hand_opt import AdamGraspTransfer, BatchedAdamGraspTransfer
-from model.hand_model import GcsHandModel
-
+import time as _time
+import warnings
+warnings.filterwarnings("ignore")
+os.environ.setdefault("PYTHONWARNINGS", "ignore")
 from typing import Dict
 from collections import namedtuple
+
+# Make vie/robokit/log.py importable from this submodule. Append (not insert
+# at 0) so local rfp packages like `utils/` still take precedence over vie's
+# top-level `utils.py` module.
+_VIE_ROOT = os.path.abspath(osp.join(osp.dirname(__file__), ".."))
+if _VIE_ROOT not in sys.path:
+    sys.path.append(_VIE_ROOT)
+from robokit import log as vlog
+
+# Show the banner before the slow imports kick in so users have something to
+# look at during the ~5-15s import phase.
+vlog.section("rfp-grasp-transfer — MANO → target-gripper transfer")
+with vlog.working("Importing ML stack (torch, trimesh, mano_pybullet, plotly, ...)"):
+    from tqdm import tqdm
+    import torch
+    import trimesh
+    import numpy as np
+    from transforms3d.axangles import axangle2mat, mat2axangle
+    import plotly.graph_objects as go
+    from mano_pybullet.hand_model import HandModel20
+    from utils.grasp_utils import get_handmodel, rotation_matrix_from_vectors
+    from utils.rot6d_utils import mat2rvec, robust_compute_rotation_matrix_from_ortho6d
+    from model.hand_opt import AdamGraspTransfer, BatchedAdamGraspTransfer
+    from model.hand_model import GcsHandModel
 
 
 LeftRightTuple = namedtuple("LeftRightTuple", ["left", "right"])
@@ -320,92 +332,83 @@ def transfer_grasp(
 
 
 def main(args):
+    t_start = _time.time()
     input_dir = args.input_dir
     mano_dir = args.mano_model_dir
     target_gripper = args.target_gripper
     debug_plots = args.debug_plots
-
-    if not osp.isdir(mano_dir):
-        raise FileNotFoundError(
-            f"Mano models dir not found: {mano_dir}! Please specify a correct path using `--mano_model_dir` argument."
-        )
-    if not osp.isdir(input_dir):
-        raise FileNotFoundError(
-            f"Input dir for demonstration data not found: {input_dir}"
-        )
-    hamer_root_dir = osp.join(input_dir, "out", "hamer")
-    hamer_npz_dir = osp.join(hamer_root_dir, "model")
-    if not osp.isdir(hamer_npz_dir):
-        raise FileNotFoundError(
-            f"The demo data dir does not contain output from hamer at the expected location: {hamer_npz_dir}"
-        )
-    # Set the MANO DIR for `mano_pybullet` interfacing
-    os.environ["MANO_MODELS_DIR"] = mano_dir
-    # device = "cuda" if torch.cuda.is_available() else "cpu"
     device = args.device
     assert device in {"cuda", "cpu"}
 
-    # Initiliaze HandModels for mano left/right and target gripper
-    _source_model_left = get_handmodel(
-        "mano_left",
-        1,
-        device,
-        json_path="urdf_assets_meta.json",
-        datadir="./grippers/",
-    )
-    _source_model_right = get_handmodel(
-        "mano_right",
-        1,
-        device,
-        json_path="urdf_assets_meta.json",
-        datadir="./grippers/",
-    )
-    target_model = get_handmodel(
-        target_gripper,
-        1,
-        device,
-        json_path="urdf_assets_meta.json",
-        datadir="./grippers/",
-    )
+    # ---------------- Configuration ----------------
+    vlog.section("Configuration")
+    vlog.note(f"input dir          : {input_dir}")
+    vlog.note(f"mano model dir     : {mano_dir}")
+    vlog.note(f"target gripper     : {target_gripper}")
+    vlog.note(f"device             : {device}")
+    vlog.note(f"num_particles      : {args.num_particles}")
+    vlog.note(f"max_iter           : {args.max_iter}")
+    vlog.note(f"frame_batch_size   : {args.frame_batch_size}")
+    vlog.note(f"debug_plots        : {debug_plots}")
 
-    # Initialize Mano Pybullet models for left/right (useful for conversion from mano to urdf equivalent)
-    _manopyb_left = HandModel20(left_hand=True)
-    _manopyb_right = HandModel20(left_hand=False)
+    if not osp.isdir(mano_dir):
+        vlog.error(f"MANO models dir not found: {mano_dir}")
+        raise FileNotFoundError(mano_dir)
+    if not osp.isdir(input_dir):
+        vlog.error(f"Input dir not found: {input_dir}")
+        raise FileNotFoundError(input_dir)
+    hamer_root_dir = osp.join(input_dir, "out", "hamer")
+    hamer_npz_dir = osp.join(hamer_root_dir, "model")
+    if not osp.isdir(hamer_npz_dir):
+        vlog.error(f"HaMeR npz dir missing (expected: {hamer_npz_dir})")
+        raise FileNotFoundError(hamer_npz_dir)
+    os.environ["MANO_MODELS_DIR"] = mano_dir
 
-    # Init the named tuples for mano models (gcs and mano_pybullet)
+    # ---------------- Loading models ----------------
+    vlog.section("Loading models")
+    with vlog.working("Loading MANO source models (left + right URDFs + meshes)"):
+        _source_model_left = get_handmodel(
+            "mano_left", 1, device,
+            json_path="urdf_assets_meta.json", datadir="./grippers/",
+        )
+        _source_model_right = get_handmodel(
+            "mano_right", 1, device,
+            json_path="urdf_assets_meta.json", datadir="./grippers/",
+        )
+    with vlog.working(f"Loading target gripper URDF ({target_gripper})"):
+        target_model = get_handmodel(
+            target_gripper, 1, device,
+            json_path="urdf_assets_meta.json", datadir="./grippers/",
+        )
+    with vlog.working("Loading mano_pybullet models (MANO .pkl unpickle + chumpy)"):
+        _manopyb_left = HandModel20(left_hand=True)
+        _manopyb_right = HandModel20(left_hand=False)
     source_models = LeftRightTuple(left=_source_model_left, right=_source_model_right)
     manopyb_models = LeftRightTuple(left=_manopyb_left, right=_manopyb_right)
 
-    # Build the AdamGraspTransfer optimizers once (left/right) and reuse across frames.
-    # Each instance loads URDF + builds the kinematic chain in its constructor; doing
-    # this per-frame was a major cost.
-    grasp_transfer_opts = LeftRightTuple(
-        left=AdamGraspTransfer(
-            _source_model_left.robot_name,
-            target_model.robot_name,
-            learning_rate=1e-3,
-            max_iter=args.max_iter,
-            num_particles=args.num_particles,
-            device=device,
-        ),
-        right=AdamGraspTransfer(
-            _source_model_right.robot_name,
-            target_model.robot_name,
-            learning_rate=1e-3,
-            max_iter=args.max_iter,
-            num_particles=args.num_particles,
-            device=device,
-        ),
-    )
+    with vlog.working("Building AdamGraspTransfer optimizers (left + right; URDF + kin-chain + correspondence)"):
+        grasp_transfer_opts = LeftRightTuple(
+            left=AdamGraspTransfer(
+                _source_model_left.robot_name, target_model.robot_name,
+                learning_rate=1e-3, max_iter=args.max_iter,
+                num_particles=args.num_particles, device=device,
+            ),
+            right=AdamGraspTransfer(
+                _source_model_right.robot_name, target_model.robot_name,
+                learning_rate=1e-3, max_iter=args.max_iter,
+                num_particles=args.num_particles, device=device,
+            ),
+        )
 
-    # Populate a list of hamer output npz files to iterate over and transfer grasp
+    # ---------------- Discover frames ----------------
     npz_files = [
-        f
-        for f in os.listdir(hamer_npz_dir)
+        f for f in os.listdir(hamer_npz_dir)
         if osp.isfile(osp.join(hamer_npz_dir, f)) and f.lower().endswith((".npz"))
     ]
     if not npz_files:
-        raise ValueError(f"No npz files found in {hamer_npz_dir}!....")
+        vlog.error(f"No npz files found in {hamer_npz_dir}")
+        raise ValueError(hamer_npz_dir)
+    vlog.step(f"discovered {len(npz_files)} hamer-output npz files")
 
     # Create extra dirs for grasp transfer plots: gripper mesh and plotly html figure viz
     transfer_mesh_dir = osp.join(hamer_root_dir, "transfer_hand_mesh")
@@ -413,18 +416,18 @@ def main(args):
     if debug_plots:
         transfer_extra_dir = osp.join(hamer_root_dir, "transfer_extra_plots")
         os.makedirs(transfer_extra_dir, exist_ok=True)
-        print(
-            f"\n[NOTE] Debuggig arg passed, creating/checking dir:{transfer_extra_dir}.\nConsider deleting it after debugging!\n"
-        )
+        vlog.warn(f"--debug_plots ON: writing ~5MB Plotly HTML per frame to {transfer_extra_dir}")
 
-    import time as _time
     frame_times = []
+
+    # ---------------- Tracking ----------------
+    vlog.section("Tracking — MANO → target gripper transfer")
 
     # ------------- Batched path (frame_batch_size > 1) -------------
     if args.frame_batch_size > 1:
         F = args.frame_batch_size
-        print(f"[batched] frame_batch_size={F} num_particles={args.num_particles} "
-              f"max_iter={args.max_iter}")
+        vlog.note(f"batched mode: F={F}, particles/frame={args.num_particles}, "
+                  f"effective batch={F * args.num_particles}, max_iter={args.max_iter}")
         # Build batched optimizers (left/right). These have target_handmodel
         # sized for F * num_particles.
         batched_opts = LeftRightTuple(
@@ -597,11 +600,21 @@ def main(args):
             frame_times.append((_time.time() - t_chunk) / real_len)
 
         if frame_times:
-            avg = sum(frame_times) / len(frame_times)
-            print(f"[grasp-transfer] processed {len(sorted_files)} frames "
-                  f"(batched, F={F}) | avg {avg*1000:.1f} ms/frame | "
-                  f"total {sum(frame_times)*F:.1f}s")
-        return  # end batched path
+            avg_per_frame = sum(frame_times) / len(frame_times)
+            total_chunk_time = sum(frame_times) * F  # frame_times stored as per-frame already
+            vlog.summary({
+                "frames":            str(len(sorted_files)),
+                "mode":              f"batched (F={F})",
+                "particles/frame":   str(args.num_particles),
+                "max_iter":          str(args.max_iter),
+                "avg ms/frame":      f"{avg_per_frame*1000:.1f}",
+                "total processing":  vlog.fmt_duration(total_chunk_time),
+                "wall (incl. setup)":vlog.fmt_duration(_time.time() - t_start),
+                "fps":               vlog.fmt_rate(len(sorted_files), total_chunk_time),
+                "output meshes":     transfer_mesh_dir,
+            }, title="grasp-transfer summary (batched)")
+            vlog.success("Done.")
+        return
 
     # ------------- Per-frame path (frame_batch_size == 1, original behavior) -------------
     for npz_f in tqdm(sorted(npz_files)):
@@ -664,7 +677,18 @@ def main(args):
 
     if frame_times:
         avg = sum(frame_times) / len(frame_times)
-        print(f"[grasp-transfer] processed {len(frame_times)} frames | avg {avg*1000:.1f} ms/frame | total {sum(frame_times):.1f}s")
+        vlog.summary({
+            "frames":            str(len(frame_times)),
+            "mode":              "per-frame (sequential)",
+            "particles/frame":   str(args.num_particles),
+            "max_iter":          str(args.max_iter),
+            "avg ms/frame":      f"{avg * 1000:.1f}",
+            "total processing":  vlog.fmt_duration(sum(frame_times)),
+            "wall (incl. setup)":vlog.fmt_duration(_time.time() - t_start),
+            "fps":               vlog.fmt_rate(len(frame_times), sum(frame_times)),
+            "output meshes":     transfer_mesh_dir,
+        }, title="grasp-transfer summary")
+        vlog.success("Done.")
 
 
 def make_parser():
