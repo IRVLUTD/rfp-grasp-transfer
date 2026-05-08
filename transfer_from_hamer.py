@@ -336,7 +336,7 @@ def main(args):
     input_dir = args.input_dir
     mano_dir = args.mano_model_dir
     target_gripper = args.target_gripper
-    debug_plots = args.debug_plots
+    debug_plots = args.debug_plots or args.save_viz
     device = args.device
     assert device in {"cuda", "cpu"}
 
@@ -597,6 +597,39 @@ def main(args):
                     _mesh_from_q(right_results[ri][0]).export(
                         osp.join(transfer_mesh_dir, f"{fname}_1.ply"))
 
+                # --debug_plots / --save_viz: write per-frame Plotly HTML
+                # mirroring the per-frame path's behavior. Each combines the
+                # transferred gripper mesh with the corresponding 3dhand PLY.
+                if debug_plots:
+                    def _write_html(target_q, hand_idx, out_name):
+                        target_grasp_q = target_q
+                        if target_grasp_q.shape[0] != 9 + len(target_model.dynamic_joints):
+                            target_grasp_q = torch.cat(
+                                (target_grasp_q,
+                                 (target_model.dynamic_joints_q_upper[0]
+                                  - target_model.dynamic_joints_q_mid[0])),
+                                dim=0,
+                            )
+                        gripper_data = target_model.get_plotly_data(
+                            q=target_grasp_q.unsqueeze(0).float().to(target_model.device),
+                            color="green", opacity=0.3,
+                        )
+                        mano_pc_path = osp.join(hamer_root_dir, "3dhand", f"{fname}_{hand_idx}.ply")
+                        scatter = []
+                        if osp.exists(mano_pc_path):
+                            mano_pc = trimesh.load_mesh(mano_pc_path)
+                            x, y, z = mano_pc.vertices.T
+                            scatter = [go.Scatter3d(
+                                x=x, y=y, z=z, mode="markers",
+                                marker=dict(size=2, color="green"),
+                            )]
+                        fig = go.Figure(data=list(gripper_data) + scatter)
+                        fig.write_html(osp.join(transfer_extra_dir, out_name))
+                    if li is not None:
+                        _write_html(left_results[li][0], 0, f"{fname}_0.html")
+                    if ri is not None:
+                        _write_html(right_results[ri][0], 1, f"{fname}_1.html")
+
             frame_times.append((_time.time() - t_chunk) / real_len)
 
         if frame_times:
@@ -722,6 +755,12 @@ def make_parser():
         "--debug_plots",
         action="store_true",
         help="This creates a ~ 5MB html plot for each frame, so only use for debugging and delete its folder after use!",
+    )
+    parser.add_argument(
+        "--save_viz",
+        action="store_true",
+        help="Unified across vie scripts: save all visualization/debug artifacts "
+             "for this stage. Equivalent to --debug_plots here.",
     )
     parser.add_argument(
         "--max_iter",
