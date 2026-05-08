@@ -73,6 +73,7 @@ def transfer_grasp_handler(
     source_models: LeftRightTuple,
     manopyb_models: LeftRightTuple,
     grasp_transfer_opts: LeftRightTuple,
+    want_vis_data: bool = False,
 ):
     """
     Can potentially contain data for both left and right hands so this
@@ -113,6 +114,7 @@ def transfer_grasp_handler(
             target_model,
             is_left=False,
             grasp_transfer_opt=grasp_transfer_opts.right,
+            want_vis_data=want_vis_data,
         )
 
         source_data_left = extract_source_data(mano_params, translation, left_idxs)
@@ -123,6 +125,7 @@ def transfer_grasp_handler(
             target_model,
             is_left=True,
             grasp_transfer_opt=grasp_transfer_opts.left,
+            want_vis_data=want_vis_data,
         )
 
         # right_idxs and left_idxs will be a list with single element, indexing into hamer output batched array
@@ -146,6 +149,7 @@ def transfer_grasp_handler(
                 target_model,
                 is_left=False,
                 grasp_transfer_opt=grasp_transfer_opts.right,
+                want_vis_data=want_vis_data,
             )
             result = [RT_target_right]
             plots = LeftRightTuple(left=None, right=fig_right)
@@ -159,6 +163,7 @@ def transfer_grasp_handler(
                 target_model,
                 is_left=True,
                 grasp_transfer_opt=grasp_transfer_opts.left,
+                want_vis_data=want_vis_data,
             )
             result = [RT_target_left]
             plots = LeftRightTuple(left=fig_left, right=None)
@@ -174,6 +179,7 @@ def transfer_grasp(
     target_model: GcsHandModel,
     is_left: bool,
     grasp_transfer_opt: "AdamGraspTransfer" = None,
+    want_vis_data: bool = False,
 ):
     hand_rot_mat = source_data["hand_rot_mat"]
     hand_theta_mat = source_data["hand_thetas"]
@@ -272,15 +278,19 @@ def transfer_grasp(
             dim=0,
         )
 
-    # Plotly viz figure
-    vis_data = source_model.get_plotly_data(q=source_grasp_q, color="red", opacity=0.3)
+    # target_gripper_mesh_data is required (we extract trimesh data from it for
+    # the mandatory PLY export). source_model.get_plotly_data is only consumed
+    # by the optional --debug_plots viz path; skip it when not needed.
     target_gripper_mesh_data = target_model.get_plotly_data(
         q=target_grasp_q.unsqueeze(0).float().to(target_model.device),
         color="green",
         opacity=0.3,
     )
-    vis_data += target_gripper_mesh_data
-    # plotly_fig = go.Figure(data=vis_data)
+    if want_vis_data:
+        vis_data = source_model.get_plotly_data(q=source_grasp_q, color="red", opacity=0.3)
+        vis_data += target_gripper_mesh_data
+    else:
+        vis_data = []
 
     # Target gripper mesh
     target_grp_trimesh = []
@@ -401,7 +411,8 @@ def main(args):
         )  # load the npz as dict to be able to update later
         hamer_data = process_hamer_output(npz_data)
         RT_result, plots, meshes = transfer_grasp_handler(
-            hamer_data, target_model, source_models, manopyb_models, grasp_transfer_opts
+            hamer_data, target_model, source_models, manopyb_models, grasp_transfer_opts,
+            want_vis_data=debug_plots,
         )
         frame_times.append(_time.time() - t_frame)
         npz_data["target_transfer_pose"] = RT_result
