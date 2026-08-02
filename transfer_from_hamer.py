@@ -45,7 +45,7 @@ def process_hamer_output(npz_data) -> Dict:
     left_idxs = np.arange(rl_index.shape[0])[rl_index == 0]
     right_idxs = np.arange(rl_index.shape[0])[rl_index == 1]
     # at max, we should have data for only 1 left and 1 right hand
-    assert (left_idxs.size <= 1) and (right_idxs.size <= 1)
+    # assert (left_idxs.size <= 1) and (right_idxs.size <= 1)
     return {
         "rl_index": rl_index,
         "num_detected": num_detected,
@@ -97,9 +97,20 @@ def transfer_grasp_handler(
     has_right = right_idxs.size > 0
     has_left = left_idxs.size > 0
 
-    if num_detected > 1:
-        assert has_left and has_right
+    # NOTE: num_detected does not imply one left plus one right. hamer can
+    # return two detections of the same hand (right == [0, 0]), or duplicate
+    # both hands (right == [0, 1, 0, 1]), so each hand is handled on its own
+    # presence rather than on the detection count.
+    assert has_left or has_right
 
+    fig_left = fig_right = mesh_left = mesh_right = None
+    # (detection index, pose) for each hand that is actually present. Ordering
+    # by detection index keeps result[i] describing detection i, and building it
+    # from the hands found means no gaps when a hand is missing -- consumers
+    # iterate this array positionally and cannot handle holes.
+    transferred = []
+
+    if has_right:
         source_data_right = extract_source_data(mano_params, translation, right_idxs)
         RT_target_right, fig_right, mesh_right = transfer_grasp(
             source_data_right,
@@ -108,7 +119,9 @@ def transfer_grasp_handler(
             target_model,
             is_left=False,
         )
+        transferred.append((int(right_idxs[0]), RT_target_right))
 
+    if has_left:
         source_data_left = extract_source_data(mano_params, translation, left_idxs)
         RT_target_left, fig_left, mesh_left = transfer_grasp(
             source_data_left,
@@ -117,43 +130,12 @@ def transfer_grasp_handler(
             target_model,
             is_left=True,
         )
+        transferred.append((int(left_idxs[0]), RT_target_left))
 
-        # right_idxs and left_idxs will be a list with single element, indexing into hamer output batched array
-        # right_idxs[0] and left_idxs[0] give us this exact index integer
-        result = [None, None]
-        result[right_idxs[0]] = RT_target_right
-        result[left_idxs[0]] = RT_target_left
+    result = [RT for _, RT in sorted(transferred)]
 
-        plots = LeftRightTuple(left=fig_left, right=fig_right)
-        meshes = LeftRightTuple(left=mesh_left, right=mesh_right)
-
-    else:
-        assert has_left or has_right
-        result = []
-        if has_right:
-            source_data = extract_source_data(mano_params, translation, right_idxs)
-            RT_target_right, fig_right, mesh_right = transfer_grasp(
-                source_data,
-                source_models.right,
-                manopyb_models.right,
-                target_model,
-                is_left=False,
-            )
-            result = [RT_target_right]
-            plots = LeftRightTuple(left=None, right=fig_right)
-            meshes = LeftRightTuple(left=None, right=mesh_right)
-        if has_left:
-            source_data = extract_source_data(mano_params, translation, left_idxs)
-            RT_target_left, fig_left, mesh_left = transfer_grasp(
-                source_data,
-                source_models.left,
-                manopyb_models.left,
-                target_model,
-                is_left=True,
-            )
-            result = [RT_target_left]
-            plots = LeftRightTuple(left=fig_left, right=None)
-            meshes = LeftRightTuple(left=mesh_left, right=None)
+    plots = LeftRightTuple(left=fig_left, right=fig_right)
+    meshes = LeftRightTuple(left=mesh_left, right=mesh_right)
 
     return np.array(result), plots, meshes
 

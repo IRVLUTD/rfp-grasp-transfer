@@ -3,9 +3,27 @@ import numpy as np
 import transforms3d
 
 
+def project_to_so3(mat):
+    """Project a nearly-orthonormal matrix onto SO(3) via SVD.
+
+    Rotation matrices coming out of hamer are stored as float32 and can be off
+    orthonormality by ~1e-3, which is enough to trip the strict eigenvector
+    check inside `transforms3d.axangles.mat2axangle`.
+    """
+    u, _, vt = np.linalg.svd(np.asarray(mat, dtype=np.float64))
+    rot = u @ vt
+    if np.linalg.det(rot) < 0:
+        # Flip the axis with the smallest singular value to keep det = +1
+        u[:, -1] *= -1
+        rot = u @ vt
+    return rot
+
+
 def mat2rvec(mat):
     """Convert rotation matrix to rotation vector."""
-    axis, angle = transforms3d.axangles.mat2axangle(mat, unit_thresh=1e-05)
+    axis, angle = transforms3d.axangles.mat2axangle(
+        project_to_so3(mat), unit_thresh=1e-05
+    )
     return axis * angle
 
 
